@@ -1,0 +1,45 @@
+{
+   "line2" : {
+      "underscore" : "0",
+      "font" : "Sans 14",
+      "strikethrough" : "0",
+      "fontsize" : "8"
+   },
+   "line1" : {
+      "strikethrough" : "0",
+      "fontsize" : "12",
+      "underscore" : "0",
+      "font" : "Sans 36"
+   },
+   "line4" : {
+      "strikethrough" : "0",
+      "fontsize" : "8",
+      "underscore" : "0",
+      "font" : "Sans 12"
+   },
+   "common" : {
+      "autocut" : "1",
+      "repeat" : "1",
+      "tapetype" : "12+",
+      "inverse" : "0",
+      "fixedwidth" : "0",
+      "halign" : "center",
+      "printerselect" : "brotherpt2430pc_zwart",
+      "valign" : "middle"
+   },
+   "version" : {
+      "description" : "# B-label2 configuration file",
+      "version" : "ver2"
+   },
+   "location" : {
+      "presets" : "",
+      "icons" : ""
+   },
+   "line3" : {
+      "strikethrough" : "0",
+      "fontsize" : "8",
+      "underscore" : "0",
+      "font" : "Sans 12"
+   }
+}
+
