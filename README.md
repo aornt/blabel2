@@ -1,10 +1,16 @@
 # blabel2
+
+# INTRODUCTION
 Brother P-touch labelprinter for Linux
 
 Blabel2 is build upon the work of Ari from Finland and uses his installation.
 The app is only tested with a brother p-touch 2430PC but may work for others.
 It is all written in Perl and uses GTK3
 
+Blabel2 is different than the Rademacher version as described bij Henrik Bengtsson because it uses CUPS and PERL.
+Maybe the Blabel2 GUI can make use of the Rademacher version as a backend for printing. I did not investigate this.
+
+There are a few bugs in the blabel2 app, but I have no time to investigate. For me all the essentials work.
 
 # INSTALLATION
 
@@ -12,7 +18,7 @@ Connect the brother label-printer with USB
 Create a new printer in cups with the RAW profile (or ASCII text)
 
 install the rpm package from blabel
-add the files from blabel2 as described in LOCATION further on in this readme
+add the files and directories from blabel2 as described in LOCATION further on in this readme
 
 
 # LABEL PRINTING WORKFLOW
