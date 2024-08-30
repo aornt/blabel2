@@ -98,23 +98,25 @@ Presetconfiguration files can also be anywhere. If you locate them elsewhere it 
 the preset and buffer functionallity is not available on the commandline. 
 
 # LOCATION
-- /usr/bin        # the perlscripts 
-  blabel2         # the new script/app version2 that creates the image
-  blabel2-print   # the updated printing script/app that sends the image to the printer (version 2)
+- /usr/bin        # The directory with the perlscripts 
+  blabel2         # The new script/app version2 that creates the image
+  blabel2-print   # The updated printing script/app that sends the image to the printer (version 2)
 
-*  blabel          # the original script/app that creates the image (can be erased when you only use version2)
-*  blabel-print    # the actual printing script/app that sends the image to the printer
-
+*  blabel          # The original script/app that creates the image (can be erased when you only use version2)
+*  blabel-print    # The actual printing script/app that sends the image to the printer
   
 - /usr/share/pixmaps/  
-  blabel.png      # image in the "about" window
+  blabel.png      # The image in the "about" window
   
 - /usr/share/applications/  
-  blabel.desktop  # desktop icon
+  blabel.desktop  # The desktop icon
 
--location of the config-file: $HOME/.config/blabel
-  the config-file blabel.conf preserves the window content on exit of the app. It is not usable as preset file for quick presets or other user presets. It will be overwritten each session.
-
--location of the presets: $HOME/.config/blabel/presets
+- /usr/share/blabel/
+  blabel2.glade   # The app-layout, this is part of the app itself
   
--location of the app-layout: /usr/share/blabel/blabel2.glade
+- $HOME/.config/blabel/
+  blabel.conf     # The config-file blabel.conf preserves the window content on exit of the app. It is not usable as preset file for quick presets or other user presets. It will be overwritten each session.
+
+- $HOME/.config/blabel/presets   # This directory is the location of the presets. They will be read and written by the app. It is possible to edit them manually.
+  The preset files used by the presetbuttons start with a specific file name: preset0.conf upto preset9.conf. These can also be loaded with the "load file" option and then changed onscreen and saved under the same name. They pop-up when the corresponding preset button is pressed.
+
