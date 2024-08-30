@@ -33,7 +33,7 @@ All 4 icons can be different and are selected in the main window.
 In the repeat field can a number be given with which to repeat the above labelblok multiple times into a labelblok-set.
 Also it is possible to position a divider-icon between the repeated labelbloks.
 
-There is a lost piece of tape (starting spill) at the start of each printed label, this is due how the brother ez-tape system works.
+There is a lost piece of tape (starting spill) at the start of each printed label, this is due how the brother ez-tape hardware system works.
 In order to prevent unnecesary printing of these starting spills, it is possible to place the labelbloks and the labelblok-sets in a buffer.
 It is done bij the "add buffer" button in the main window and can be done ach often as needed.
 
@@ -44,6 +44,8 @@ This buffer-divider icon can be choosen with the file-choose button in the buffe
 
 In the buffer window it is also possible to clear the buffer and to print the buffer.
 The buffer is not stored on harddisk and is empty when starting the label app.
+
+There is a limitation on the length the pixelbuffer and therefore the maximum tapelength is about 6100 mm.
 
 
 # PRESETS
@@ -83,17 +85,15 @@ After saving (or loading) the first preset it is easy to alter the preset-items 
 
 It is also possible to select your own preset configurations on other locations bij selecting them with the preset-filechooser button. These are non-persistent and have to be manually selected each session you want to use them.
 
-
 In the fixed-width field you can set a fixed length in millimeters. This is the length of a single label. If repeat is used then the total length is the repeat x the fixed length.
 The mimimum length is the combined length of the images that are used in the label. If you want to go shorter then you have to change the size of the images.
 If the fixed length is not enough to accomodate the text and the images then the text is cut off at the right and the field with the actual length becomes red as a warning.
 You can shorten the text or choose a smaller font in order to fit it in the fixed lenght
 
-
-There is a limitation on the length the pixelbuffer and therefore the maximum tapelength is about 6100 mm.
-
 It is possible to change the standard search location of the map of the preset-configurations and the images in the configuration window. it is just for convenience.
+
 The image files can be anywhere and the complete path is saved in the preset.
+
 Presetconfiguration files can also be anywhere. If you locate them elsewhere it is just more clicking through the directory tree.
 
 
@@ -119,6 +119,7 @@ the preset and buffer functionallity is not available on the commandline.
 - $HOME/.config/blabel/
   - blabel.conf     # The config-file blabel.conf preserves the window content on exit of the app. It is not usable as preset file for quick presets or other user presets. It will be overwritten each session.
 
-- $HOME/.config/blabel/presets   # This directory is the location of the presets. They will be read and written by the app. It is possible to edit them manually.
-  The preset files used by the presetbuttons start with a specific file name: preset0.conf upto preset9.conf. These can also be loaded with the "load file" option and then changed onscreen and saved under the same name. They pop-up when the corresponding preset button is pressed.
+- $HOME/.config/blabel/presets   # This directory is the location of the presets.
+  - XXXXXX.conf # These will be read and written by the app. It is possible to edit them manually.
+  - presetX.conf #  The preset files used by the presetbuttons start with a specific file name: preset0.conf upto preset9.conf. These can also be loaded with the "load file" option and then changed onscreen and saved under the same name. They pop-up when the corresponding preset button is pressed.
 
