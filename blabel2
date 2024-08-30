@@ -1,0 +1,3370 @@
+#!/usr/bin/perl
+
+# B-Label2's GTK3 GUI part
+# B-label2 (C) 2023-2024 by Aornt >
+# Released under Perl artistic license.
+
+# B-Label (C) 2011-2020 by Ari Sovijärvi <ari.sovijarvi@cleverbit.fi>
+# Released under Perl artistic license.
+
+print "constants initialisation\n" if not $quiet;
+use constant VERSION=>"2";
+use constant CFGVERSION=>"2";
+use constant VERSIONDESCRIPTION=>"v2.10 build 01";
+use constant VERSIONDATE=>"2023-09-20";
+use constant PRINTPROGRAM=>"blabel2-print";
+
+print "load Perl use modules\n" if not $quiet;
+my $usequiet = $quiet;
+$usequiet=1;
+print "use gtk3\n" if not $usequiet;
+use Gtk3 -init;
+print "use Glib\n" if not $usequiet;
+use Glib qw/TRUE FALSE/;
+print "use File::Temp\n" if not $usequiet;
+use File::Temp qw/tempfile/;
+print "use POSIX\n" if not $usequiet;
+use POSIX;
+print "use Pango\n" if not $usequiet;
+use Pango;
+print "use Net::CUPS\n" if not $usequiet;
+use Net::CUPS;
+print "use Getopt::Long\n" if not $usequiet;
+use Getopt::Long;
+print "use Pod::Usage\n" if not $usequiet;
+use Pod::Usage;
+print "use Encode\n" if not $usequiet;
+use Encode;
+print "Encode::Unicode\n" if not $usequiet;
+use Encode::Unicode;
+print "use utf8\n" if not $usequiet;
+use utf8;
+
+# use utf8::all;
+#use strict;
+print "use Term::ANSIColor\n" if not $usequiet;
+use Term::ANSIColor;
+use warnings;
+
+use Data::Dumper;
+
+print "use JSON::XS\n" if not $usequiet;
+use JSON::XS;
+
+my $json = JSON::XS->new->allow_nonref->pretty;
+
+
+# Loads the Glade-file and initializes our UI parts.
+sub init_gui_config {
+
+  my $debugbasemarge=$_[0];
+  my $cmd_printer=$_[1];
+  my $cmd_autocut=$_[2];
+  my $cmd_tape=$_[3];
+  my $cmd_valign=$_[4];
+  my $cmd_halign=$_[5];
+  my $cmd_inverse=$_[6];
+  my $cmd_repeat=$_[7];
+  my $cmd_fixedwidth=$_[8];
+
+  my $thismarge = "  ".$debugbasemarge;
+
+  print $debugbasemarge."#init_gui_config{\n" if not $quiet;
+  
+  my $i;
+  
+  # gladefile is at a fixed location
+  my $gtkbuilder=new Gtk3::Builder;
+  $gtkbuilder->add_from_file("/usr/share/blabel/blabel".VERSION.".glade");
+
+  our $config_window=$gtkbuilder->get_object("config_window");
+  our $main_window=$gtkbuilder->get_object("blabel-window");
+  our $about_window=$gtkbuilder->get_object("about-window");
+  our $reset_window=$gtkbuilder->get_object("reset-window");
+  our $preview=$gtkbuilder->get_object("preview");
+  our $bufferpreview=$gtkbuilder->get_object("bufferpreview");
+
+  our $inverse=$gtkbuilder->get_object("inverse");
+  our $halign=$gtkbuilder->get_object("halign");
+  our $valign=$gtkbuilder->get_object("valign");
+  our $previewscroll=$gtkbuilder->get_object("previewscroll");
+  our $tapetype=$gtkbuilder->get_object("tapetype");
+  our $autocut=$gtkbuilder->get_object("autocut");
+  our $printerselect=$gtkbuilder->get_object("printerselect");
+
+  our $label_bf=$gtkbuilder->get_object("label_bf");
+  our $label_il=$gtkbuilder->get_object("label_il");
+  our $label_ir=$gtkbuilder->get_object("label_ir");
+  our $label_ol=$gtkbuilder->get_object("label_ol");
+  our $label_or=$gtkbuilder->get_object("label_or");
+  our $label_dv=$gtkbuilder->get_object("label_dv");
+  
+  our $button_bf=$gtkbuilder->get_object("button_bf");
+  our $button_il=$gtkbuilder->get_object("button_il");
+  our $button_ir=$gtkbuilder->get_object("button_ir");
+  our $button_ol=$gtkbuilder->get_object("button_ol");
+  our $button_or=$gtkbuilder->get_object("button_or");
+  our $button_dv=$gtkbuilder->get_object("button_dv");
+  
+  
+  
+  our $repeatcount = $gtkbuilder->get_object("repeatcount");
+  
+  our $fixedwidth_mm = $gtkbuilder->get_object("fixedwidth");
+  our $label_width_mm = $gtkbuilder->get_object("labelwidth");
+  our $total_setwidth_mm = $gtkbuilder->get_object("totalwidth");
+  our $current_buffer_tapetype = "";
+  
+  our $config_location_preset = $gtkbuilder->get_object("config_location_preset");
+  our $config_location_image = $gtkbuilder->get_object("config_location_image");
+  
+  our $labelwidth_color = "";
+  our $css = Gtk3::CssProvider->new();
+ 
+  our @fontselect;
+  our @entry;
+  our @underline;
+  our @strikethrough;
+  for ($i=1; $i<5; $i++) {
+    $fontselect[$i]=$gtkbuilder->get_object("fontselect".$i);
+    $entry[$i]=$gtkbuilder->get_object("entry".$i);
+    $underline[$i]=$gtkbuilder->get_object("underlinetoggle".$i);
+    $strikethrough[$i]=$gtkbuilder->get_object("strikethroughtoggle".$i);
+  }
+ 
+ our $config_data;
+ 
+  #--------
+  # buffer 
+  our $buffer_window=$gtkbuilder->get_object("buffer-window");
+  our $leave_bufferwindow=$gtkbuilder->get_object("leave_bufferwindow");
+  our $print_bufferwindow=$gtkbuilder->get_object("print_bufferwindow"); 
+  our $clear_bufferwindow=$gtkbuilder->get_object("clear_bufferwindow"); 
+  our $view_buffer=$gtkbuilder->get_object("view_buffer");  
+  our %image_buffers =  ();
+  our $buf_indexpointer=0;
+  our $print_now=$gtkbuilder->get_object("print_now");
+  our $add_to_buffer=$gtkbuilder->get_object("add_to_buffer");
+  
+ 
+  #--------  
+  #preset files
+  our $presetfile_chooser=$gtkbuilder->get_object("presetfile_chooser");
+  our $fcdselectbutton=$gtkbuilder->get_object("fcd-select");
+  
+  
+  #our $presetfile_chooser_db=$gtkbuilder->get_object("presetfile_chooser_db");
+  our $presetfile_description=$gtkbuilder->get_object("presetfile_description");
+  our $presetfile_nameinput = $gtkbuilder->get_object("presetfile_filename_input");
+  our $preset_path =   $ENV{HOME}."/.config/blabel/presets";
+  our $image_path =   $ENV{HOME}."/.config/blabel/images";
+ 
+  our %buttonarray = ();
+  for (my $i_g=0; $i_g<10; $i_g++) {
+      my $tmpkey = "preset_".$i_g;
+      $buttonarray{ $tmpkey } = $gtkbuilder->get_object($tmpkey);    # hash
+  }
+  our $current_presetfile_db; # stores the filename from the   presetfile_chooser_db
+  
+  
+  #--------
+  #filechooser
+  our $filechooser_window=$gtkbuilder->get_object("filechooser_window");  
+  our $fcd_select=$gtkbuilder->get_object("fcd_select");
+  our $fcd_cancel=$gtkbuilder->get_object("fcd_cancel");
+  #our $about_fcd_button=$gtkbuilder->get_object("about_fcd_button");
+  
+  # opslag voor de icon file namen
+  our $headerfile_bf_filename="";
+  our $headerfile_ol_filename="";
+  our $headerfile_il_filename="";
+  our $headerfile_dv_filename="";
+  our $headerfile_ir_filename="";
+  our $headerfile_or_filename="";
+  
+  
+  
+  our $iconchooser_window=$gtkbuilder->get_object("iconchooser_window");  
+  our $icd_select=$gtkbuilder->get_object("icd_select");
+  our $icd_cancel=$gtkbuilder->get_object("icd_cancel");
+  our $cur_icon_window;
+  
+  
+
+  #-----------
+  # debugging
+  
+  our $mainloop_teller =0;
+  
+  #---------
+  
+  our $defaultfont;
+  our @configfont=();
+
+  our $tempfilename;
+  (undef, $tempfilename)=tempfile('/tmp/blabel-a.XXXXXX', OPEN=>0);
+
+  our $tempfilenamebuf;
+  (undef, $tempfilenamebuf)=tempfile('/tmp/blabel-b.XXXXXX', OPEN=>0);
+
+  
+  our $surface_width=0;
+  our $surface_height=0;
+  our $surface="";
+  our $cr="";
+  our $lastwidth=0;
+  our $viewscrolled=0;
+  our $buffer_height=0;
+  
+  our $max_pix_bufferlength = 32767; # max margin size of the margin of a GTK widget (or of the widget itself ?)
+  
+  #our $mm_pix_conversionrate = 16 / 3;  # 5.3333333 pix per mm
+  
+  our $mm_pix_conversionrate = 112 / 15.6;  #  pix per mm
+  # 80 / 10.88 = 7.352941
+  # 112 / 15.6 = 7.179487 H
+  # 112 / 16 = 7
+  # 128 / 18 = 7.111
+  # 96 / 13.4 = 7.164179
+
+  our $blabel2_alarmcolor = "#ff7a78";
+  # We load the configuration just before connecting the signals, so changing all the
+  # GUI parts to match correct state doesn't fire the update_preview function bazillion times.
+  &load_config($thismarge,$cmd_printer, $cmd_autocut, $cmd_tape, $cmd_valign, $cmd_halign, $cmd_inverse,$cmd_repeat,$cmd_fixedwidth);
+
+  
+  # catch all system windowclosing event (crossicon in right upper corner of window)
+  $main_window->signal_connect (delete_event => sub {
+    print $thismarge." main_window->hide\n" if not $quiet;
+    &main_quit;
+  });
+
+  $about_window->signal_connect (delete_event => sub {
+    print $thismarge." about_window->hide\n" if not $quiet;
+    $about_window->hide();
+    return TRUE;
+  });
+  
+  $reset_window->signal_connect (delete_event => sub {
+       print $thismarge." reset_window->hide\n" if not $quiet;
+      $reset_window->hide();
+      return TRUE;
+  });
+
+  $buffer_window->signal_connect (delete_event => sub {
+       print $thismarge." bufferpreview->hide\n" if not $quiet;
+       $buffer_window->hide();
+       return TRUE;
+  });
+  
+  $config_window->signal_connect (delete_event => sub {
+       print $thismarge." config_window->hide\n" if not $quiet;
+       $config_window->hide();
+       return TRUE;
+  });
+  
+  $filechooser_window->signal_connect (delete_event => sub {
+       print $thismarge." filechooser_window->hide\n" if not $quiet;
+       $filechooser_window->hide();
+       return TRUE;
+  });
+  
+  $iconchooser_window->signal_connect (delete_event => sub {
+       print $thismarge." iconchooser_window->hide\n" if not $quiet;
+       $iconchooser_window->hide();
+       return TRUE;
+  });
+ 
+  $gtkbuilder->connect_signals;
+  $main_window->set_title("B-Label".VERSION);
+  $main_window->show;
+ 
+  print $debugbasemarge."#}init_gui_config\n" if not $quiet;
+}
+
+# 0: input boolean
+sub boolean2int {
+  my $boolean=$_[0];
+  if ($boolean) {
+    return "1";
+  } else {
+    return "0";
+  }
+}
+
+# Dumps the configuration into a simple text file
+sub save_config {
+  my $debugbasemarge="";
+  my $thismarge = "  ".$debugbasemarge;
+  my $i;
+  my $settings;
+  my $jsettings;
+  $quiet=FALSE;
+  if (! -d $ENV{HOME}."/.config") {
+    print $thismarge."! .config directory missing, creating.\n" if not $quiet;
+    mkdir($ENV{HOME}."/.config") || die ("Can't create .config -directory!");
+  }
+
+  if (! -d $ENV{HOME}."/.config/blabel") {
+    print $thismarge."! blabel directory missing, creating.\n" if not $quiet;
+    mkdir($ENV{HOME}."/.config/blabel") || die ("Can't create blabel -directory!");
+  }
+
+  # make directory for quickpresets
+  if (! -d $ENV{HOME}."/.config/blabel/presets") {
+    print $thismarge."! blabel/presets directory missing, creating.\n" if not $quiet;
+    my $tmpname = $ENV{HOME}."/.config/blabel/presets";
+    mkdir($tmpname) || die ("Can't create blabel/presets -directory!");
+  }
+  
+  if (! -f $ENV{HOME}."/.config/blabel/blabel".VERSION.".json") {
+    print $thismarge."! blabel/configfile missing, creating.\n" if not $quiet;
+    &create_config ($thismarge, $ENV{HOME}."/.config/blabel/blabel".VERSION.".json");
+  }
+  
+  # classic config save
+ 
+    print $thismarge."json save start:\n" if not $quiet;
+    
+    open($jsettings, "> ".$ENV{HOME}."/.config/blabel/blabel".VERSION.".json");
+    
+    #open($settings, "> ".$ENV{HOME}."/.config/blabel/blabel".VERSION.".conf");
+    
+    print $thismarge."json save: version>description:"."# B-label".VERSION." configuration file"."\n" if not $quiet;
+    
+    $config_data->{'version'}->{'description'} = "# B-label".VERSION." configuration file";
+    $config_data->{'version'}->{'version'} = "ver".CFGVERSION;
+
+    for ($i=1; $i<5; $i++) {
+       $t_line[$i]= "line".$i;
+        $config_data->{$t_line[$i]}->{'font'} =  $fontselect[$i]->get_font_name;
+        $config_data->{$t_line[$i]}->{'underscore'} =  &boolean2int($underline[$i]->get_active);
+        $config_data->{$t_line[$i]}->{'strikethrough'} =  &boolean2int($strikethrough[$i]->get_active);
+    }
+    print $thismarge."json save: inverse->get_active:".&boolean2int($inverse->get_active)."\n" if not $quiet;
+    
+    
+    $config_data->{'common'}->{'inverse'} =  &boolean2int($inverse->get_active);
+    $config_data->{'common'}->{'halign'} =  $halign->get_active_id;
+    $config_data->{'common'}->{'valign'} =  $valign->get_active_id;
+    
+    print $thismarge."json save: tapetype->get_active_id:".$tapetype->get_active_id."\n" if not $quiet;
+    $config_data->{'common'}->{'tapetype'} =  $tapetype->get_active_id;
+    
+    print $thismarge."json save: printerselect->get_active_text():".$printerselect->get_active_text()."\n" if not $quiet;
+    $config_data->{'common'}->{'printerselect'} = $printerselect->get_active_text();
+    
+    $config_data->{'common'}->{'autocut'} = &boolean2int($autocut->get_active);
+        
+    $config_data->{'location'}->{'presets'} = $config_location_preset->get_text();
+    $config_data->{'location'}->{'icons'} = $config_location_image->get_text();
+  
+    
+    
+    
+    
+    #print $thismarge."preset location: ".$config_data->{'location'}->{'presets'}."\n" if not $quiet;
+ 
+    print $jsettings $json->encode($config_data);
+    #print $jsettings $json->encode($config_location_preset->get_text())."\n";
+    print $jsettings "\n";
+    close($jsettings);
+    
+    print $thismarge."json save end:\n" if not $quiet;
+  
+  # end json config save
+ 
+  
+  
+}
+
+sub create_config {
+  my $debugbasemarge=$_[0];
+  my $thismarge = "  ".$debugbasemarge;
+  my $i;
+  my $settings;
+  my $jsettings;
+  # start json config save
+  print $thismarge."json create start:\n" if not $quiet;
+  
+  my $cfg_vars_text = 
+'{
+"version": {
+"description": "# B-label'.VERSION.' configuration file\n",
+"version": "ver'.CFGVERSION.'"
+},
+"location": {
+"presets": "aaa",
+"icons": ""
+},
+"common": {
+"halign": "left",
+"valign": "middle",
+"inverse": "FALSE",
+"tapetype": "12",    
+"printerselect": "",
+"repeat": "1",
+"fixedwidth": "0",
+"autocut": "FALSE"
+},
+"line1": {
+"font": "Sans Bold 12",
+"fontsize": "12",
+"underscore": "FALSE",
+"strikethrough": "FALSE"
+},
+"line2": {
+"font": "Sans 8",
+"fontsize": "8",
+"underscore": "FALSE",
+"strikethrough": "FALSE"
+},
+"line3": {
+"font": "Sans 8",
+"fontsize": "8",
+"underscore": "FALSE",
+"strikethrough": "FALSE"
+},
+"line4": {
+"font": "Sans 6",
+"fontsize": "8",
+"underscore": "FALSE",
+"strikethrough": "FALSE"
+}
+}';
+  
+  open($jsettings, "> ".$_[1]);
+  print $jsettings $cfg_vars_text;
+  print $jsettings "\n";
+  close($jsettings);
+  
+  print $thismarge."json create end:\n" if not $quiet;
+
+  # end json config save
+  
+}
+
+
+# Reads the configuration, attempts to validate it and then restores the values.
+# Also populates the printer list dropdown menu.
+sub load_config {
+    my $debugbasemarge=$_[0];
+    my $cmd_printer=$_[1];
+    my $cmd_autocut=$_[2];
+    my $cmd_tape=$_[3];
+    my $cmd_valign=$_[4];
+    my $cmd_halign=$_[5];
+    my $cmd_inverse=$_[6];
+    my $cmd_repeat=$_[7]; 
+    my $cmd_fixedwidth=$_[8];
+
+    my $thismarge = "  ".$debugbasemarge;
+    my $i;
+
+    # Majority of the default values come from the Glade file, so we can just exit
+    # this function if the configuration file fails to load. The only thing we need
+    # to accomplish here is to populate the printer list.
+    print $debugbasemarge."#load_config{\n" if not $quiet;
+    print $thismarge."Printers in this system:\n" if not $quiet;
+
+    my @printers=$cups->getDestinations();
+    foreach my $printer (@printers) {
+    my $printername=$printer->getName();
+    $printerselect->append_text($printername);
+    print $thismarge."+ $printername\n" if not $quiet;
+    $clear_bufferwindow->set_sensitive(1);
+    }
+
+    my $printercount=@printers;
+
+    print $thismarge.$printercount ." printers found.\n" if not $quiet;
+
+    # If there's at least one printer, get rid of the "None" option.
+    if ($printercount>0) {
+    $printerselect->remove(0);
+    }
+    $printerselect->set_active(0);
+
+    # Now that we have the printer list set up, try actually loading the configuration.
+
+    # json read
+    if (! -f $ENV{HOME}."/.config/blabel/blabel".VERSION.".json") {
+        print $thismarge."! blabel/configfile missing, creating.\n" if not $quiet;
+      &create_config ($thismarge, $ENV{HOME}."/.config/blabel/blabel".VERSION.".json");
+    }
+
+    print $thismarge."-- Json Read Start--\n" if not $quiet;
+
+
+    my $jsontext = do { open(my $jsettings, "< ".$ENV{HOME}."/.config/blabel/blabel".VERSION.".json")};
+
+    open($jsettings, $ENV{HOME}."/.config/blabel/blabel".VERSION.".json");
+    my @jsontext = <$jsettings>;
+    my $json = join "\n", @jsontext;
+    print $thismarge."------ \n".  $json ."\n ------\n" if not $quiet;
+
+    #our $config_data;  #configdata structur  
+    $config_data = decode_json $json;
+
+
+    #print $thismarge."-DUMPER- \n" if not $quiet;
+    #print Dumper %{$config_data->{version}};
+    print $thismarge."-PRINT- \n" if not $quiet;
+    # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+ 
+
+    print $thismarge." Configuration is a compatible version.\n" if not $quiet;
+    print $thismarge." reading output common-halign: ".$config_data->{'common'}->{'halign'}."\n";
+
+    # Since the system default font varies, we get whatever is defaulted here.
+    $defaultfont=$fontselect[1]->get_font_name;
+    #$tmpi=0;
+    # Restore per-line settings
+    our @t_line;
+    for ($i=1; $i<5; $i++) {
+        $t_line[$i]= "line".$i;
+    }
+
+    for ($i=1; $i<5; $i++) {
+
+        print $thismarge."Line ".($i)."--------------\n" if not $quiet;
+
+        print $thismarge." Font:". $config_data->{$t_line[$i]}->{'font'}."\n" if not $quiet;
+        $fontselect[$i]->set_font_name($config_data->{$t_line[$i]}->{'font'});
+
+        print $thismarge." Underscore:". $config_data->{$t_line[$i]}->{'underscore'}."\n" if not $quiet;
+        if ($config_data->{$t_line[$i]}->{'underscore'} eq "TRUE") {
+            $underline[$i]->set_active(TRUE);
+        } else {
+            $underline[$i]->set_active(FALSE);
+        }        
+
+        #$underline[$i]->set_active($config_data->{$t_line[$i]}->{'underscore'});
+        print $thismarge." Strikethrough:". $config_data->{$t_line[$i]}->{'strikethrough'}."\n" if not $quiet;
+        if ($config_data->{$t_line[$i]}->{'strikethrough'} eq "TRUE") {
+            $strikethrough[$i]->set_active(TRUE);
+        } else {
+            $strikethrough[$i]->set_active(FALSE);
+        }        
+
+    }
+
+    # Restore inverse setting
+    my $t_inverse="";
+    if ($cmd_inverse ne "-1") {
+        $t_inverse=$cmd_inverse;
+    } else {
+        if ($config_data->{'common'}->{'inverse'} eq "TRUE") {
+        $t_inverse = TRUE;
+        } else {
+        $t_inverse = FALSE;
+        }
+    }
+    $inverse->set_active($t_inverse);
+    print $thismarge."1  inverse: $t_inverse\n" if not $quiet;
+
+
+
+    # Sanity-check and restore horizontal alignment
+    my $t_halign="";
+    if ($cmd_halign ne "-1") {
+        $t_halign=lc($cmd_halign);
+    } else {
+        $t_halign =$config_data->{'common'}->{'halign'};
+    }
+    if (($t_halign eq "left") || ($t_halign eq "center") || ($t_halign eq "right")) {
+        $halign->set_active_id($t_halign);
+        print $thismarge." HAlign: ". $t_halign."\n" if not $quiet;
+    } else {
+        print $thismarge."! Incorrect HAlign value: '".$t_halign."'!\n" if not $quiet;
+    }
+
+
+    # Sanity-check and restore vertical alignment
+    my $t_valign="";
+    if ($cmd_valign ne "-1") {
+        $t_valign=lc($cmd_valign);
+    } else {
+        $t_valign =$config_data->{'common'}->{'valign'};
+    }
+    if (($t_valign eq "top") || ($t_valign eq "middle") || ($t_valign eq "bottom")) {
+        $valign->set_active_id($t_valign);
+        print $thismarge." VAlign: ". $t_valign."\n" if not $quiet;
+    } else {
+        print $thismarge."! Incorrect VAlign value: '".$t_valign."'!\n" if not $quiet;
+    }
+
+
+    # Sanity-check and restore tape size
+    my $t_tape="";
+    if ($cmd_tape ne "-1") {
+        $t_tape=$cmd_tape;
+    } else {
+        $t_tape =$config_data->{'common'}->{'tapetype'};
+    }
+    print $thismarge." reading output t_tape: ".$config_data->{'common'}->{'tapetype'}."\n";
+ 
+    if ( &tapetype_check ($t_tape)) {
+    
+    
+    #if (($t_tape eq "6") || ($t_tape eq "9") || ($t_tape eq "9+") || ($t_tape eq "12") || ($t_tape eq "12+")  || ($t_tape eq "18") || ($t_tape eq "24")) {
+    
+    
+        $tapetype->set_active_id($t_tape);
+        print $thismarge."Tape: $t_tape\n" if not $quiet;
+    } else {
+        print $thismarge."Incorrect tape value: '$t_tape'!\n" if not $quiet;
+    }
+
+
+    my $t_repeat=1;
+    if ($cmd_repeat ne "-1") {
+        $t_repeat=$cmd_repeat;
+    } else {
+        $t_repeat =$config_data->{'common'}->{'repeat'};
+    }
+
+    $repeatcount->set_text($t_repeat);
+    print $thismarge."Repeat: $repeatcount\n" if not $quiet;     
+
+
+    my $t_fixedwidth=1;
+    if ($cmd_fixedwidth ne "-1") {
+        $t_fixedwidth=$cmd_fixedwidth;
+    } else {
+        $t_fixedwidth =$config_data->{'common'}->{'fixedwidth'};
+    }
+
+    $fixedwidth_mm->set_text($t_fixedwidth);
+    print $thismarge."Fixedwidth : $t_fixedwidth\n" if not $quiet;     
+
+
+    # If we have the same printer than last time still connected, select that.
+    my $t_printer="";
+    if ($cmd_printer ne "") {
+    $t_printer=$cmd_printer;
+    }
+    else {
+    $t_printer =$config_data->{'common'}->{'printerselect'};
+    }
+    $i=0;
+    foreach my $printer (@printers) {
+        my $printername=$printer->getName();
+        if ($t_printer eq $printername) {
+            print $thismarge."18  Printer: $t_printer\n" if not $quiet;
+            $printerselect->set_active($i);
+        }
+        $i++;
+    }
+
+        
+    # Restore autocut setting. 
+    my $t_autocut=FALSE;
+    if ($config_data->{'common'}->{'autocut'} eq "TRUE") {
+    $t_autocut=TRUE;
+    } else {
+    $t_autocut=FALSE;
+    }
+
+
+    # Override it if the command parameter was set.
+    if ($cmd_autocut==0) {
+        $t_autocut=FALSE;
+    }
+    if ($cmd_autocut==1) {
+        $t_autocut=TRUE;
+    }
+    $autocut->set_active($t_autocut);
+
+
+    print $thismarge."autocut: $t_autocut\n" if not $quiet;
+
+
+    print $thismarge."preset location: ".$config_data->{'location'}->{'presets'}."\n" if not $quiet;
+    $config_location_preset->set_text($config_data->{'location'}->{'presets'});
+    print $thismarge."icon location: ".$config_data->{'location'}->{'icons'}."\n" if not $quiet;
+    $config_location_image->set_text($config_data->{'location'}->{'icons'});
+
+    # presetbuttons laden nadat de preset directory is geladen
+    &update_presetbuttons($thismarge);
+
+    print $thismarge."<<<<<Finished restoring settings<.\n" if not $quiet;
+
+    print $thismarge."-- Json Read End--\n" if not $quiet; 
+
+    # end json read  
+    print $debugbasemarge."#}load_config\n" if not $quiet;
+
+}
+
+
+# =============================================================================================================================
+# RESET WINDOW functions
+# =============================================================================================================================
+
+# Brings up the reset options window
+sub reset_window {
+  $reset_window->show();
+
+}
+
+
+# Erases all entered text from the fields 
+# . signal from glade
+sub sig_reset_text {
+  my $thismarge = "sig-rt>>   ";
+  &reset_text($thismarge);
+  $reset_window->hide();
+  &update_preview($thismarge);  
+}
+
+# Erases all selected icon files. signal from glade
+sub sig_reset_icons {
+  my $thismarge = "sig-ri>>   ";
+  &reset_icons($thismarge);
+  &reset_presets($thismarge);
+  $reset_window->hide();
+  &update_preview($thismarge);  
+}
+
+
+# resets style 
+sub sig_reset_style {
+  my $thismarge = "sig-rs>>   ";
+  &reset_styles($thismarge);
+  &reset_presets($thismarge);
+  $reset_window->hide();
+  print "update_preview triggered by sig_reset_style{}  \n" if not $quiet;
+  &update_preview($thismarge);
+}
+
+# Erases all entered text from the fields and removes selected
+# icon file. signal from glade
+sub sig_reset_text_icons {
+  my $thismarge = "sig-rti>>   ";
+  &reset_text($thismarge);
+  &reset_icons($thismarge);
+  &reset_presets($thismarge);
+
+  $reset_window->hide();
+  &update_preview($thismarge);  
+}
+
+
+# Erases all text and icons and restores saved font configuration
+sub sig_reset_restore {
+  my $currentquiet;
+  $currentquiet = $quiet;
+  $currentquiet = True;
+  my $debugbasemarge="sig-rr>> ";
+  my $thismarge = $debugbasemarge."  ";
+  
+  my $i;
+  &reset_text($thismarge);
+  &reset_icons($thismarge);
+  &reset_presets($thismarge);
+  for ($i=1; $i<5; $i++) {
+    $entry[$i]->set_text("");
+    # Special case for when we're started for the first time and have no configuration yet.
+    if (defined($configfont[$i])) {
+      $fontselect[$i]->set_font_name($configfont[$i]);
+    }
+  }
+  print $debugbasemarge."# sig_reset_restore { \n" if not $currentquiet;
+  &update_preview($thismarge);
+  $reset_window->hide();
+  print $debugbasemarge."# } sig_reset_restore  \n" if not $currentquiet;
+}
+
+# closes the reset options window
+sub sig_reset_cancel {
+  $reset_window->hide();
+   # $reset_window->destroy();
+  
+}
+sub reset_styles {
+  my $debugbasemarge=$_[0];
+  my $thismarge = $debugbasemarge."  ";
+  my $i;
+  for ($i=1; $i<5; $i++) {
+    #$entry[$i]->set_text("");
+    $fontselect[$i]->set_font_name($defaultfont);
+  }
+}
+
+# Erases all entered text from the fields and removes selected
+# header file.
+sub reset_text {
+  my $debugbasemarge=$_[0];
+  my $thismarge = $debugbasemarge."  ";
+  my $i;
+  for ($i=1; $i<5; $i++) {
+    $entry[$i]->set_text("");
+  }
+}
+
+
+# Erases all entered text from the fields and removes selected
+# header file.
+sub reset_icons {
+  my $debugbasemarge=$_[0];
+  my $thismarge = $debugbasemarge."  ";
+  $headerfile_bf_filename = "";
+  &reset_icon($thismarge,$label_bf);
+  
+  $headerfile_ol_filename = "";
+  &reset_icon($thismarge,$label_ol);
+ 
+  $headerfile_il_filename = "";
+  &reset_icon($thismarge,$label_il);
+ 
+  $headerfile_ir_filename = "";
+  &reset_icon($thismarge,$label_ir);
+ 
+  $headerfile_or_filename = "";
+  &reset_icon($thismarge,$label_or);
+ 
+  $headerfile_dv_filename = ""; 
+  &reset_icon($thismarge,$label_dv);
+ 
+}
+
+sub reset_presets {
+  my $debugbasemarge=$_[0];
+  my $thismarge = $debugbasemarge."  ";
+  $presetfile_description->set_text("");          
+  $presetfile_nameinput->set_text("");            
+ 
+}
+
+sub reset_icon {
+  my $debugbasemarge=$_[0];
+  my $thismarge = $debugbasemarge."  ";
+  my $label_tmp = $_[1];
+  set_lbl_color($label_tmp,$thismarge,"none");
+  $label_tmp->set_text ("");  # display the choosen short icon name in the label field
+  $label_tmp->set_tooltip_text ("");  # display tooltip with full file path of the icon
+}
+
+
+
+
+
+
+
+# 
+
+sub sig_update_tapetype_signal {
+  my $currentquiet;
+  $currentquiet = $quiet;
+  $currentquiet = 0;
+  my $debugbasemarge="sig-ups>> ";
+  my $thismarge = $debugbasemarge."  ";
+  print $debugbasemarge."# sig_update_tapetype_signal {  \n" if not $currentquiet;
+  
+   
+  
+  &update_preview($thismarge);
+  
+  if (($current_buffer_tapetype eq "") or ($tapetype->get_active_id() eq $current_buffer_tapetype)) { 
+      # set $current_buffer_tapetype to current tape type
+      #$current_buffer_tapetype = $tapetype->get_active_id();
+      print $debugbasemarge." add_to_buffer->set_sensitive(1)  \n" if not $currentquiet;
+       $add_to_buffer->set_sensitive(1);
+  } else {
+      print $debugbasemarge." add_to_buffer->set_sensitive(0)  \n" if not $currentquiet;
+      $add_to_buffer->set_sensitive(0);
+  }
+
+  
+  print $debugbasemarge."#} sig_update_tapetype_signal  \n" if not $currentquiet;
+}
+
+
+
+sub sig_update_preview_signal {
+  my $currentquiet;
+  $currentquiet = $quiet;
+  $currentquiet = 0;
+
+  my $debugbasemarge="sig-ups>> ";
+  my $thismarge = $debugbasemarge."  ";
+  print $debugbasemarge."# sig_update_preview_signal vv {  \n" if not $currentquiet;
+  &update_preview($thismarge);
+  print $debugbasemarge."#} sig_update_preview_signal  \n" if not $currentquiet;
+}
+
+
+# Escapes the couple of characters that make Pango explode.
+# 0: text string to sort out
+sub escape {
+  my $escape_string=$_[0];
+  $escape_string =~ s/\&/&amp;/g;
+  $escape_string =~ s/\</&lt;/g;
+  $escape_string =~ s/\>/&gt;/g;
+  return $escape_string;
+}
+
+# =============================================================================================================================
+# CONFIG WINDOW functions
+# =============================================================================================================================
+
+sub show_config_window {
+  print "#show_config_window{\n" if not $quiet;
+  my $thismarge="   ";
+  #$buffer_window->set_version(VERSIONDESCRIPTION." (".VERSIONDATE.")");
+  print $thismarge." pause A\n" if not $quiet;
+  $config_window->show();
+  #$bufferpreview->set_from_pixbuf(&render_buffer);
+  #$viewscrolled=1;
+  print $thismarge." pause B\n" if not $quiet; 
+  print "#}show_config_window\n" if not $quiet;
+}
+
+
+sub show_about_window {
+  print "#show_about_window{\n" if not $quiet;
+  my $thismarge="   ";
+  #$buffer_window->set_version(VERSIONDESCRIPTION." (".VERSIONDATE.")");
+  print $thismarge." pause A\n" if not $quiet;
+  #$about_window->show();
+  #$bufferpreview->set_from_pixbuf(&render_buffer);
+  #$viewscrolled=1;
+  
+#sub show_about {
+ # print "#show_about{\n" if not $quiet; 
+  #my $thismarge = "  ";
+  $about_window->set_version(VERSIONDESCRIPTION." (".VERSIONDATE.")");
+  #print $thismarge." pause A\n" if not $quiet; 
+  $about_window->run;
+  print $thismarge." pause B\n" if not $quiet; 
+  $about_window->hide;
+ # print "#}show_about\n" if not $quiet; 
+ 
+#}
+
+  
+   print $thismarge." pause B\n" if not $quiet; 
+  print "#}show_about_window\n" if not $quiet;
+ 
+  
+}
+
+
+
+sub show_config_cancel {
+  print "#show_config_cancel{} hide config window\n" if not $quiet;
+  $config_window->hide();
+}
+
+sub sig_presetmap_changed {
+    my $thismarge = "  ";
+    print "#sig_presetmap_changed{\n" if not $quiet;
+    # prestbuttons laden met de bestandsnamen uit de nieuwe map
+    &update_presetbuttons($thismarge); 
+    print "}sig_presetmap_changed\n" if not $quiet;
+}
+
+
+#   $config_location_preset->set_text($config_data->{'location'}->{'presets'});
+#    $config_location_image->set_text($config_data->{'location'}->{'icons'});
+
+
+
+
+sub sig_iconmap_changed {
+    print "#sig_iconmap_changed{\n" if not $quiet;
+    my $thismarge = "  ";
+   
+
+    print "}sig_iconmap_changed\n" if not $quiet;
+}
+
+# =============================================================================================================================
+# FILECHOOSER functions
+# =============================================================================================================================
+
+# actie on the presetfileloader button in the mainscreen
+sub sig_presetfile_loader_db {
+  print "#sig_presetfile_loader_db{} show fileloader window\n" if not $quiet;
+  &show_fcd_window;
+}
+
+
+sub show_fcd_window {
+  print "#show_fcd_window{\n" if not $quiet;
+  my $thismarge="   ";
+  #$buffer_window->set_version(VERSIONDESCRIPTION." (".VERSIONDATE.")");
+  print $thismarge." pause A\n" if not $quiet;
+  my $tmpfilename = $config_location_preset->get_text();
+  
+  if ($tmpfilename eq "") {
+     $tmpfilename = $preset_path;
+  }
+  $filechooser_window->set_current_folder ($tmpfilename);
+  
+  $filechooser_window->show();
+  #$bufferpreview->set_from_pixbuf(&render_buffer);
+  #$viewscrolled=1;
+  print $thismarge." pause B\n" if not $quiet; 
+  print "#}show_fcd_window\n" if not $quiet;
+}
+
+
+# buttone select is clicked inside filechooser window
+sub fcd_select_cb {
+    my $debugbasemarge="int-sig >>> ";
+    my $thismarge = $debugbasemarge."  ";
+
+   print $debugbasemarge."#fcd_select_cb{ \n"  if not $quiet;
+    #$preset_conf = "file";
+    $current_presetfile_db = $filechooser_window->get_filename();
+    #my $pc_configfile = $presetfile_chooser->get_filename;
+     
+    &load_preset ($thismarge,$current_presetfile_db);  
+    #&load_preset;
+    #print " presetfile_loader update screen\n"  if not $quiet;
+
+    $filechooser_window->hide();
+    &update_preview ($thismarge);
+    print $debugbasemarge."#}fcd_select_cb\n"  if not $quiet;   
+}
+
+sub fcd_cancel_cb {
+  print "#fcd_cancel_cb{} hide filechooser_dialog_window\n" if not $quiet;
+  $filechooser_window->hide();
+}
+
+#===========================
+# icon chooser windows
+#===========================
+sub sig_show_icd_ol_window {
+   &show_icd_window ("ol");
+}
+sub sig_show_icd_il_window {
+   &show_icd_window ("il" );
+}
+sub sig_show_icd_ir_window {
+   &show_icd_window ("ir" );
+}
+
+sub sig_show_icd_or_window {
+   &show_icd_window ("or" );
+}
+
+sub sig_show_icd_dv_window {
+   &show_icd_window ("dv" );
+}
+
+sub sig_show_icd_bf_window {
+   &show_icd_window ("bf" );
+}
+
+sub show_icd_window {
+  print "#show_icd_window{\n" if not $quiet;
+  my $thismarge="   ";
+  $cur_icon_window = $_[0];
+  print $thismarge."icon-chooser for icon: " .$cur_icon_window. "\n"  if not $quiet;
+  
+  my $tmpfilename = $config_location_image->get_text();
+  if ($tmpfilename eq "") {
+     $tmpfilename = $image_path;
+  }
+  $iconchooser_window->set_current_folder ($tmpfilename);
+  $iconchooser_window->show();
+  print "#}show_icd_window\n" if not $quiet;
+}
+
+
+sub sig_icd_select_cb {
+  my $debugbasemarge="int-icd>>> ";
+  my $thismarge = $debugbasemarge."  ";
+  my $currentquiet;
+  $currentquiet = $quiet;
+  #$currentquiet = True;
+  
+  print $debugbasemarge."#sig_icd_select_cb{  \n" if not $currentquiet;
+  $iconchooser_window->hide();
+ 
+  print $thismarge."cur_icon_window: ".$cur_icon_window."\n" if not $currentquiet;
+  
+  if ($cur_icon_window eq "ol") {
+     #$headerfile_ol_filename = $iconchooser_window->get_filename();  
+     $headerfile_ol_filename = &ic_disp_file($thismarge,$iconchooser_window->get_filename(),$label_ol);
+ 
+     
+     print $thismarge."headerfile_".$cur_icon_window."_filename: ".$headerfile_ol_filename." \n" if not $currentquiet;
+     &update_preview($thismarge);
+  }
+  
+  if ($cur_icon_window eq "il") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+     $headerfile_il_filename = &ic_disp_file($thismarge,$iconchooser_window->get_filename(),$label_il);
+
+     print $thismarge."headerfile_".$cur_icon_window."_filename: ".$headerfile_il_filename." \n" if not $currentquiet;
+     &update_preview($thismarge);
+  }
+
+  if ($cur_icon_window eq "ir") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+     $headerfile_ir_filename = &ic_disp_file($thismarge,$iconchooser_window->get_filename(),$label_ir);
+
+     print $thismarge."headerfile_".$cur_icon_window."_filename: ".$headerfile_ir_filename." \n" if not $currentquiet;
+     &update_preview($thismarge);
+  }  
+  
+  if ($cur_icon_window eq "or") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+     $headerfile_or_filename = &ic_disp_file($thismarge,$iconchooser_window->get_filename(),$label_or);
+
+    print $thismarge."headerfile_".$cur_icon_window."_filename: ".$headerfile_or_filename." \n" if not $currentquiet;
+     &update_preview($thismarge);
+  }
+  
+  if ($cur_icon_window eq "dv") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+     $headerfile_dv_filename = &ic_disp_file($thismarge,$iconchooser_window->get_filename(),$label_dv);
+
+     print $thismarge."headerfile_".$cur_icon_window."_filename: ".$headerfile_dv_filename." \n" if not $currentquiet;
+     &update_preview($thismarge);
+  }
+  
+  if ($cur_icon_window eq "bf") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+     $headerfile_bf_filename = &ic_disp_file($thismarge,$iconchooser_window->get_filename(),$label_bf);
+
+     print $thismarge."headerfile_".$cur_icon_window."_filename: ".$headerfile_bf_filename." \n" if not $currentquiet;
+     &update_bufferview($thismarge);
+
+  }
+  
+  
+  print "#} sig_icd_select_cb\n" if not $currentquiet;
+}
+
+sub sig_icd_clear_cb {
+  my $debugbasemarge="int-icd>>> ";
+  my $thismarge = $debugbasemarge."  ";
+  my $currentquiet;
+  $currentquiet = $quiet;
+  #$currentquiet = True;
+  
+  print $debugbasemarge."sig_icd_clear_cb{  \n" if not $currentquiet;
+  $iconchooser_window->hide();
+ 
+  print $thismarge."cur_icon_window: ".$cur_icon_window."\n" if not $currentquiet;
+  
+  if ($cur_icon_window eq "ol") {
+     #$headerfile_ol_filename = $iconchooser_window->get_filename();  
+     $headerfile_ol_filename=&ic_clear_file($thismarge,$headerfile_ol,$label_ol);
+     print $thismarge."headerfile_".$cur_icon_window."_filename:  \n" if not $currentquiet;
+  
+    &update_preview($thismarge);
+  }
+  
+  if ($cur_icon_window eq "il") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+      $headerfile_il_filename=&ic_clear_file($thismarge,$headerfile_il,$label_il);
+     print $thismarge."headerfile_".$cur_icon_window."_filename:  \n" if not $currentquiet;
+    
+     &update_preview($thismarge);
+  }
+
+  if ($cur_icon_window eq "ir") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+     $headerfile_ir_filename=&ic_clear_file($thismarge,$headerfile_ir,$label_ir);
+     print $thismarge."headerfile_".$cur_icon_window."_filename:  \n" if not $currentquiet;
+    
+     &update_preview($thismarge);
+  }  
+  
+  if ($cur_icon_window eq "or") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+      $headerfile_or_filename=&ic_clear_file($thismarge,$headerfile_or,$label_or);
+     
+     print $thismarge."headerfile_".$cur_icon_window."_filename:  \n" if not $currentquiet;
+     &update_preview($thismarge);
+  }
+  
+  if ($cur_icon_window eq "dv") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+      $headerfile_dv_filename=&ic_clear_file($thismarge,$headerfile_dv,$label_dv);
+    
+     print $thismarge."headerfile_".$cur_icon_window."_filename:  \n" if not $currentquiet;
+     &update_preview($thismarge);
+  }
+  
+  if ($cur_icon_window eq "bf") {
+     #$headerfile_il_filename = $iconchooser_window->get_filename();  
+      $headerfile_bf_filename=&ic_clear_file($thismarge,$headerfile_bf,$label_bf);
+
+    print $thismarge."headerfile_".$cur_icon_window."_filename:  \n" if not $currentquiet;
+     &update_bufferview($thismarge);
+  }
+  
+  
+  print "#} sig_icd_clear_cb\n" if not $currentquiet;
+}
+
+
+
+
+sub sig_icd_cancel_cb {
+  my $debugbasemarge="int-icd>>> ";
+  my $thismarge = $debugbasemarge."  ";
+  my $currentquiet;
+  $currentquiet = $quiet;
+  print $debugbasemarge."sig_icd_cancel_cb{} buttonclick\n" if not $quiet;
+  $iconchooser_window->hide();
+}
+
+
+
+sub ic_disp_file {
+    #     print $thismarge."- Restore preset line: ".$pc_pointer." - icon ol "."\n" if not $quiet;
+    #     $jdecname = $json->decode($presetconfiguration[$pc_pointer++]);
+    
+    # $jdecname = &ic_disp_file($thismarge,$jdecname,$label_or);
+
+    
+         my $debugbasemarge=$_[0];
+         my $thismarge = $debugbasemarge."  ";
+         my $label_tmp = $_[2];
+         my $jdecname = $_[1];
+ 
+         if ($jdecname and ($jdecname ne "(nothing)")) {
+                print $thismarge."jdecname: ". $jdecname ."  \n" if not $quiet;  
+
+                $file =  (split( /\/|\\/, $jdecname))[-1];
+                if (-f $jdecname) {
+                  set_lbl_color($label_tmp,$thismarge,"none");
+                } else {
+                  set_lbl_color($label_tmp,$thismarge,"alarmred");
+                }
+         } else { 
+                print $thismarge."jdecname: <leeg> \n" if not $quiet;  
+
+                $jdecname="";   
+                $file="";               
+                set_lbl_color($label_tmp,$thismarge,"none");
+         }
+         $label_tmp->set_text ($file);  # display the choosen short icon name in the label field
+        $label_tmp->set_tooltip_text ($jdecname);  # display tooltip with full file path of the icon
+         
+         
+         return  $jdecname;
+}
+
+
+# clear the icon file when the clear button is clicked
+sub ic_clear_file {
+    my $debugbasemarge=$_[0];
+    my $thismarge = $debugbasemarge."  ";
+    my $headerfile_tmp = $_[1];
+    my $label_tmp = $_[2];
+    #$headerfile_tmp->set_filename ("");
+    set_lbl_color($label_tmp,$thismarge,"none");
+    $label_tmp->set_text ("");  # display the choosen short icon name in the label field
+    $label_tmp->set_tooltip_text ("");  # display tooltip with full file path of the icon
+ 
+    return  "";
+}
+
+# =============================================================================================================================
+# BUFFER functions
+# =============================================================================================================================
+
+sub sig_print_buffer {
+
+    print "#sig_print_buffer{\n" if not $quiet;
+    my $thismarge="  ";
+    my $autocutparam="";
+    my $quietparam="";
+    my $inverseparam="";
+    my $grandtotal_width = 0;
+    if ($autocut->get_active) {
+        $autocutparam="--autocut";
+    }
+    
+    if ($quiet) {
+        $quietparam="--quiet";
+    }
+
+    if ($inverse->get_active) {
+        $inverseparam="--inverse";
+    }
+    
+    $grandtotal_pixbuf = &render_buffer;
+    $grandtotal_pixbuf->save($tempfilenamebuf, "png");
+    
+    #  $imagedata->save($tempfilename, "png");
+    #my $currenttapetype="--tapetype=".$tapetype->get_active_id()  ;
+    
+   
+    my $currenttapetype="--tapetype=".$current_buffer_tapetype  ;
+    
+    
+    # system(PRINTPROGRAM, "--file=".$tempfilenamebuf, "--printer=".$printerselect->get_active_text, $autocutparam, $quietparam, $inverseparam);
+    system(PRINTPROGRAM, "--file=".$tempfilenamebuf, "--printer=".$printerselect->get_active_text, $currenttapetype, $autocutparam, $quietparam, $inverseparam);
+
+    print "#}sig_print_buffer\n" if not $quiet;
+}
+
+sub render_buffer {
+    my $debugbasemarge=$_[0];
+    my $thismarge = "  ".$debugbasemarge;
+    #debugging
+    my $currentquiet;
+    $currentquiet = $quiet;
+    $currentquiet = True;
+
+    print $debugbasemarge."#render_buffer{\n" if not $quiet;
+
+    my $grandtotal_width = 0;
+ 
+    # determine the size of the maincanvas
+    my $i = 0;
+    my $tp_height=0;
+    my $tp_width=0;
+    print $thismarge."loop to determine width\n" if not $quiet;
+    
+    my $divider_headerpic;
+    my $divider_headerstate;
+    my $divider_headerwidth=0;
+    my $divider_headerheight=0;
+     
+    
+    my $current_tapeheight = &get_tape_height($thismarge);
+    # scale the picture an load in a Gtk3::Gdk::Pixbuf variable > set headerstate to OK if picture available
+    
+    #($divider_headerpic, $divider_headerstate)=&image_load_resize($headerfile->get_filename, $current_tapeheight);
+    ($divider_headerpic, $divider_headerstate)=&image_load_resize($headerfile_bf_filename, $current_tapeheight);
+    
+    # check if a picture is available for printing on the label
+    if ($divider_headerstate eq "ok") {   
+       $divider_headerwidth=$divider_headerpic->get_width;
+       $divider_headerheight=$divider_headerpic->get_height;
+    }
+    $i=0;
+    
+#   foreach my $image (sort keys %$image_buffers) {
+    for (keys %image_buffers) {
+    
+       print $thismarge."image $i \n";
+ 
+        my $t_pixbuf =  $image_buffers{$_};
+    #  $t_pixbuf = $image_buffers{$image} ;
+        $tp_width = $t_pixbuf->get_width;
+      
+        $grandtotal_width = $grandtotal_width + $tp_width;
+        $tp_height = $t_pixbuf->get_height;
+        print $thismarge."image height : ".$tp_height."\n"; 
+        print $thismarge."image width : ".$tp_width."\n"; 
+        if ($tp_height ge $buffer_height) {
+           $buffer_height = $tp_height;
+        }
+        $i++;
+    }
+    
+    # add divider width between each buffer
+    my $max_i = $i;
+    my $divider_totalwidth = ($i - 1 ) *  $divider_headerwidth;
+    $grandtotal_width = $grandtotal_width + $divider_totalwidth;
+    print $thismarge."merge  ".$i."  images\n";
+    my $grandtotal_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $grandtotal_width,  $buffer_height);
+    my $off_set=0;
+    #foreach my $image (sort keys %$image_buffers) {
+    $i = 0;
+        #for (keys %image_buffers) {
+    for  my $tkey (sort keys %image_buffers) {
+      #my $t2_pixbuf =  $image_buffers{$_};
+ 
+ 
+      my $t2_pixbuf = $image_buffers{$tkey};
+      
+     # print "$key => $value\n";
+        
+      #print $image . ' - ' . $image_buffers{$image}; 
+      print $thismarge."image: ".$i."\n"; 
+      #$t2_pixbuf = $image_buffers{$image};
+      $t_width = $t2_pixbuf->get_width;
+      $t_height = $t2_pixbuf->get_height;
+      print $thismarge."copy buffer image in main_pixbuf at position $off_set \n" if not $quiet;
+      $t2_pixbuf->copy_area( 0, 0, $t_width  , $t_height , $grandtotal_pixbuf, $off_set, 0);
+      $off_set = $off_set + $t2_pixbuf->get_width;
+      $i++;
+           
+      if ($divider_headerstate eq "ok") {
+        if ($i < $max_i) {
+            print $thismarge."copy buffer divider in main_pixbuf at position $off_set \n" if not $quiet;
+            $divider_headerpic->copy_area( 0, 0, $divider_headerwidth  , $divider_headerheight , $grandtotal_pixbuf, $off_set, 0);
+            $off_set = $off_set + $divider_headerwidth;           
+        }
+      }
+    }
+
+    print $debugbasemarge."#}render_buffer\n" if not $quiet;
+    return $grandtotal_pixbuf;
+}
+
+sub sig_add_to_buffer {
+  print "#sig_add_to_buffer{\n" if not $quiet;
+  my $thismarge="   ";
+  if ($current_buffer_tapetype eq "" ) { 
+      # set $current_buffer_tapetype to current tape type
+      $current_buffer_tapetype = $tapetype->get_active_id();
+      print $thismarge."current_buffer_tapetype = $current_buffer_tapetype\n" if not $quiet;
+
+  }
+  
+  if ($tapetype->get_active_id() eq $current_buffer_tapetype) { 
+
+    my $imagedata=&render_text($thismarge);  # get the current image form the mainwindow
+
+    # check if a buffer divider has to be added in front of the new image
+    if ($buf_indexpointer > 0) {
+        # create a new buffer item from the last buf_indexpointer
+        $buf_name="buffer".$buf_indexpointer;
+        print $thismarge."buf_indexpointer = $buf_indexpointer \n" if not $quiet;
+        print $thismarge."buf_name = $buf_name\n" if not $quiet;
+    }
+    # create a new buffer item from the last buf_indexpointer
+    $buf_name="buffer".$buf_indexpointer;
+    print $thismarge."buf_indexpointer = $buf_indexpointer \n" if not $quiet;
+    print $thismarge."buf_name = $buf_name\n" if not $quiet;
+    # store the image in the newly created buffer
+    $image_buffers{$buf_name} = $imagedata;
+    $buf_indexpointer = $buf_indexpointer + 1;  # increase the buffer pointer
+    print $thismarge."imagedata added to buffer\n" if not $quiet;
+    
+    # make buffer buttons in the mainwindow and in the bufferwindow active
+    # because there is a buffer on which they can operate
+    $print_bufferwindow->set_sensitive(1);
+    $clear_bufferwindow->set_sensitive(1);
+    $view_buffer->set_sensitive(1);
+    $bufferpreview->set_from_pixbuf(&render_buffer);
+    # check if the current label on screen can be added again to the buffer without exeeding the ultimate buffer maxwidth
+    if (!&check_maxbuffer_size($imagedata->get_width(),$max_pix_bufferlength)){
+        $add_to_buffer->set_sensitive(0);
+    }
+  } else {
+    print " -- tapetype buffer does not match current tapetype \n" if not $quiet;
+  }
+  
+  print "#}sig_add_to_buffer\n" if not $quiet;
+}
+
+sub sig_clear_all_buffer {
+  print "#sig_clear_all_buffer{\n" if not $quiet;
+  $buffer_height=0;
+  my $thismarge="   ";
+  my $i=0;
+  for (keys %image_buffers) {
+        delete $image_buffers{$_};
+        $i++;
+  }
+  print $thismarge."buffer cleared of $i images\n" if not $quiet;
+  $buf_indexpointer = 0;
+  $print_bufferwindow->set_sensitive(0);
+  $clear_bufferwindow->set_sensitive(0);
+  $view_buffer->set_sensitive(0); 
+  $add_to_buffer->set_sensitive(1);  
+  if (($entry[1]->get_text eq "") && ($entry[2]->get_text eq "") && ($entry[3]->get_text eq "") && ($entry[4]->get_text eq "")) {
+     $add_to_buffer->set_sensitive(0);
+  }
+  $current_buffer_tapetype = "";
+  &show_buffer_cancel;
+  print "#}sig_clear_all_buffer\n" if not $quiet;
+}
+
+sub sig_show_buffer {
+  print "#show_buffer{\n" if not $quiet;
+  my $thismarge="   ";
+  #$buffer_window->set_version(VERSIONDESCRIPTION." (".VERSIONDATE.")");
+  print $thismarge." pause A\n" if not $quiet;
+  $buffer_window->show();
+  $bufferpreview->set_from_pixbuf(&render_buffer);
+  $viewscrolled=1;
+  print $thismarge." pause B\n" if not $quiet; 
+  print "#}show_buffer\n" if not $quiet;
+}
+
+sub update_bufferview {
+  print "#update_bufferview{\n" if not $quiet;
+  
+  $bufferpreview->set_from_pixbuf(&render_buffer);
+  $viewscrolled=1;
+  print "#}update_bufferview\n" if not $quiet;
+ 
+}
+
+
+#sub show_buffer2 {
+#  print "#show_buffer2{&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n" if not $quiet;
+#  my $thismarge="   ";
+  #$buffer_window->set_version(VERSIONDESCRIPTION." (".VERSIONDATE.")");
+#  print $thismarge." pause A\n" if not $quiet;
+#  $bufferpreview->set_from_pixbuf(&render_buffer);
+#  $viewscrolled=1;
+ 
+#  print $thismarge." pause B\n" if not $quiet; 
+#  print "#}show_buffer2\n" if not $quiet;
+#}
+
+sub sig_show_buffer_cancel {
+  print "# sig_show_buffer_cancel{}\n" if not $quiet;
+  &show_buffer_cancel;
+}
+
+
+
+# Brings up the reset options window
+sub show_buffer_cancel {
+  print "#show_buffer_cancel{} hide buffer window\n" if not $quiet;
+  $buffer_window->hide();
+}
+
+sub get_tape_height {
+  my $debugbasemarge=$_[0];
+  my $thismarge = "  ".$debugbasemarge;
+  my $currentquiet;
+  $currentquiet = $quiet;
+  #$currentquiet = TRUE;  
+  
+  
+  print $debugbasemarge."#get_tape_height{\n" if not $currentquiet;
+
+  #$buffer_window->set_version(VERSIONDESCRIPTION." (".VERSIONDATE.")");
+  my $tapeheight=128; # 24mm: 128px, 12 & 9mm: 64px, 6mm: 40px
+  # determine the max height of the selected labeltape.
+  if ($tapetype->get_active_id() eq "0") {  
+    $tapeheight=72; # voor test purposes height is 64 (as 12 mm) also used for display preview
+  }
+  elsif ($tapetype->get_active_id() eq "6") {
+    $tapeheight=32;  
+  }
+  #elsif ($tapetype->get_active_id() eq "6+") {
+  #  $tapeheight=40;  
+  #}
+  elsif ($tapetype->get_active_id() eq "9") {
+    $tapeheight=48;
+  }
+  elsif ($tapetype->get_active_id() eq "9+") {
+    $tapeheight=56;
+  }
+  elsif ($tapetype->get_active_id() eq "12") {
+    $tapeheight=64;
+  }
+  elsif ($tapetype->get_active_id() eq "12+") {
+    $tapeheight=80;
+  }
+  elsif ($tapetype->get_active_id() eq "18") {
+    $tapeheight=96;
+  }
+  elsif ($tapetype->get_active_id() eq "18+") {
+    $tapeheight=112;
+  }
+  elsif ($tapetype->get_active_id() eq "24") {
+  # 128
+    $tapeheight=128;
+  }
+  else {
+     $tapeheight=64;  # noodoplossing nog bekijken
+  }
+  
+  print $thismarge." tapeheight = $tapeheight\n" if not $currentquiet;
+  #$buffer_window->hide;
+  print $debugbasemarge."#}get_tape_height\n" if not $currentquiet;
+  return $tapeheight;
+    
+}
+
+# copies the header (= buffer_divider) picture into the image buffer.
+sub render_bufferdivider {
+  my $debugbasemarge=$_[0];
+  my $thismarge = "  ".$debugbasemarge;
+  #debugging
+  my $currentquiet;
+  $currentquiet = $quiet;
+  $currentquiet = TRUE;
+
+  print $debugbasemarge."#render_bufferdivider{\n" if not $currentquiet;
+  
+  my $headerpic;
+  my $headerstate;
+  my $current_tapeheight = &get_tape_height($thismarge);
+  
+  # ==BUFFER DIVIDER IMAGE GENERATOR ===================================================================================================
+  print $thismarge."Buffer divider Image-generator ------ \n"  if not $currentquiet;
+  
+  # scale the picture an load in a Gtk3::Gdk::Pixbuf variable > set headerstate to OK if picture available
+  ($headerpic, $headerstate)=&image_load_resize($headerfile_bf_filename, $current_tapeheight);
+# ($headerpic, $headerstate)=&image_load_resize($headerfile->get_filename, $current_tapeheight);
+  # check if a picture is available for printing on the label
+  if ($headerstate eq "ok") {
+    my $headerwidth=$headerpic->get_width;
+    my $headerheight=$headerpic->get_height;
+    print $thismarge."BufferDivider Picture : ".$headerfile_bf_filename." (".$headerwidth."x".$headerpic->get_height.") \n" if not $currentquiet;
+    
+    # create a blank workcanvas with Gtk3::Gdk::Pixbuf
+    my $bdiv_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $headerwidth,  $height);
+    print $thismarge."bdiv_pixbuf_height: ". $bdiv_pixbuf->get_height()."\n" if not $currentquiet;
+    print $thismarge."bdiv_pixbuf_width: ".$bdiv_pixbuf->get_width()."\n" if not $currentquiet;
+    if ($headerstate eq "ok") {
+            print $thismarge."start headerpic  - ". $headerfile_bf_filename ." in bdiv_pixbuf at position 0 \n" if not $currentquiet;
+            $headerpic->copy_area( 0, 0, $headerwidth  , $headerheight , $bdiv_pixbuf, 0, 0);
+    }
+    return $bdiv_pixbuf;
+  } else {
+    my $dummy_divider_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  1,  $height);
+    print $thismarge."Buffer Divider Picture not found ot loadable: ".$headerfile_bf_filename."\n" if not $currentquiet;
+
+    return $dummy_divider_pixbuf;
+  }
+  print $debugbasemarge."#}render_bufferdivider\n" if not $currentquiet;
+}  # end render picture
+  
+# converts and rounds pixels to mm.
+# 0: pixels
+# 1: conversionrate
+sub pixel_to_mm {
+  $mysize = $_[0] / $_[1];
+  
+  $size_in_mm = int(($mysize * 10) + 0.5) / 10;
+  #$size_in_mm = int($mysize * 10) / 10;
+  return $size_in_mm;
+}
+
+sub round_pixels {
+  return int(($_[0] * 10) + 0.5) / 10;  
+}
+
+# Creates a Pango layout from the entered text, then returns it as Pixbuf object
+# for on-screen use or PNG dumping. Optionally copies the header picture into the
+# image as well.
+sub render_text {
+  my $debugbasemarge=$_[0];
+  my $thismarge = "  ".$debugbasemarge;
+  #debugging
+  my $currentquiet;
+  $currentquiet = $quiet;
+  #$currentquiet = TRUE;
+  
+  print $debugbasemarge."#render_text{\n" if not $quiet;
+
+
+  $mainloop_teller= $mainloop_teller +1;
+  print $thismarge."mainloop_teller : ". $mainloop_teller." ** \n" if not $currentquiet;
+  
+  my @foreground=(0, 0, 0);
+  my @background=(255, 255, 255);
+  
+  my $maxwidth=1000;  # unknown what the function of this is. at 600 it gave critical error with Sans Bold > 125 lettertype
+  my $rounded;
+  my $vertmarge = 6;
+  
+  my $headerpic_ol;
+  my $headerstate_ol;
+  my $headerpic_il;
+  my $headerstate_il;
+  my $headerpic_ir;
+  my $headerstate_ir;
+  my $headerpic_or;
+  my $headerstate_or;
+  my $headerpic_dv;
+  my $headerstate_dv;
+  my $textstate;
+
+  my $left_divider_imageobject;
+  my $right_divider_imageobject;
+
+  my $headerwidth_ol=0;
+  my $headerheight_ol=0;
+  my $headerwidth_il=0;
+  my $headerheight_il=0;
+  my $headerwidth_ir=0;
+  my $headerheight_ir=0;
+  my $headerwidth_or=0;
+  my $headerheight_or=0;
+  my $headerwidth_dv=0;
+  my $headerheight_dv=0;
+  my $headerwidth_dv_half=0;
+
+  print $thismarge."step 1 \n"  if not $currentquiet;
+  # determine the max height of the selected labeltape.
+  my $current_tapeheight = &get_tape_height($thismarge);
+  
+  my $repeat;
+  if ($repeatcount->get_text) {
+    $repeat = $repeatcount->get_text;
+    if ($repeat < 1 ) {
+        $repeat = 1;
+    }
+  }
+  else  { 
+    $repeat = 1;
+  }
+  my $single_width_px = 0;
+  my $total_width_px = 0;
+  my $totalpicture_width_px = 0;
+  my $totalpicture_width_px_netto = 0;
+  
+  
+  # ==IMAGE GENERATOR ===================================================================================================
+  print $thismarge."Image-generators ------ \n"  if not $currentquiet;
+  # scale the picture an load in a Gtk3::Gdk::Pixbuf variable > set headerstate to OK if picture available
+  ($headerpic_ol, $headerstate_ol)=&image_load_resize($headerfile_ol_filename, $current_tapeheight);
+  ($headerpic_il, $headerstate_il)=&image_load_resize($headerfile_il_filename, $current_tapeheight);
+  ($headerpic_ir, $headerstate_ir)=&image_load_resize($headerfile_ir_filename, $current_tapeheight);
+  ($headerpic_or, $headerstate_or)=&image_load_resize($headerfile_or_filename, $current_tapeheight);
+  ($headerpic_dv, $headerstate_dv)=&image_load_resize($headerfile_dv_filename, $current_tapeheight);
+ #$headerfile_ol_filename
+ #$headerfile_il_filename
+ #$headerfile_dv_filename
+ #$headerfile_ir_filename
+ #$headerfile_ir_filename
+ 
+  
+  # check if a picture is available for printing on the label
+ 
+  if ($headerstate_ol eq "ok") {
+    $headerwidth_ol=$headerpic_ol->get_width;
+    $headerheight_ol=$headerpic_ol->get_height;
+    $totalpicture_width_px = $totalpicture_width_px + $headerwidth_ol;
+    print $thismarge."Picture_ol : ".$headerfile_ol_filename." (".$headerwidth_ol."x".$headerheight_ol.") totallength : ".$totalpicture_width_px."\n" if not $currentquiet;
+    
+  }
+  if ($headerstate_il eq "ok") {
+    $headerwidth_il=$headerpic_il->get_width;
+    $headerheight_il=$headerpic_il->get_height;
+    $totalpicture_width_px = $totalpicture_width_px + $headerwidth_il;
+    print $thismarge."Picture_il : ".$headerfile_il_filename." (".$headerwidth_il."x".$headerheight_il.") totallength : ".$totalpicture_width_px."\n" if not $currentquiet;
+  }
+  if ($headerstate_ir eq "ok") {
+    $headerwidth_ir=$headerpic_ir->get_width;
+    $headerheight_ir=$headerpic_ir->get_height;
+    $totalpicture_width_px = $totalpicture_width_px + $headerwidth_ir;
+    print $thismarge."Picture_ir : ".$headerfile_ir_filename." (".$headerwidth_ir."x".$headerheight_ir.") totallength : ".$totalpicture_width_px."\n" if not $currentquiet;
+  }
+   if ($headerstate_or eq "ok") {
+    $headerwidth_or=$headerpic_or->get_width;
+    $headerheight_or=$headerpic_or->get_height;
+    $totalpicture_width_px = $totalpicture_width_px + $headerwidth_or;
+    print $thismarge."Picture_or : ".$headerfile_or_filename." (".$headerwidth_or."x".$headerheight_or.") totallength : ".$totalpicture_width_px."\n" if not $currentquiet;
+  }
+  $totalpicture_width_px_netto = $totalpicture_width_px;
+  
+  if ($headerstate_dv eq "ok") {
+     # create two halves of the divider
+    ($left_divider_imageobject,$right_divider_imageobject)=&divider_split($headerpic_dv);
+    
+  
+     
+     
+    $headerwidth_dv=$headerpic_dv->get_width;
+    $headerheight_dv=$headerpic_dv->get_height;
+    $headerwidth_dv_half = $headerwidth_dv / 2;  # half the divider with to determine the start positon of the next image or text
+    $totalpicture_width_px = $totalpicture_width_px + $headerwidth_dv;  # the divider size is added to the total width
+    # the divider size is not added to the total netto picture width
+    print $thismarge."Picture_dv : ".$headerfile_dv_filename." (".$headerwidth_dv."x".$headerheight_dv.") totallength : ".$totalpicture_width_px."\n" if not $currentquiet;
+    
+  }
+  # $totalpicture_width_px  contains the pix-width of all pics
+  # $totalpicture_width_px_netto contains the pix-width wthout the divider pics
+
+
+  # ==FIXED WIDTH ===================================================================================================
+  # if there is a fixed width then determine the fixed available space for the text
+
+  # get the fixed width that gets dispayed in the label  
+  my $fixed_labelwidth_mm = 0;
+  my $fixed_labelwidth_pix = 0;
+
+  if ($fixedwidth_mm->get_text) {
+    $fixed_labelwidth_mm = $fixedwidth_mm->get_text;
+
+    if ($fixed_labelwidth_mm < 0 ) {
+        $fixed_labelwidth_mm = 0;
+    } 
+    
+  
+    # milimeters conversion to pixels
+    $fixed_labelwidth_pix = int(($fixed_labelwidth_mm * $mm_pix_conversionrate ) + 0.5);
+    
+    if ($fixed_labelwidth_pix > $max_pix_bufferlength) {
+       $fixed_labelwidth_pix = $max_pix_bufferlength;
+       $fixedwidth_mm->set_text(&pixel_to_mm($max_pix_bufferlength, $mm_pix_conversionrate));
+    }
+    
+  }
+  else  { 
+    $fixed_labelwidth_mm = 0;
+    $fixed_labelwidth_pix = 0;
+  }
+  print $thismarge."P01- fixed_labelwidth_pix:".$fixed_labelwidth_pix. "  fixed_labelwidth_mm: ". $fixed_labelwidth_mm ." \n" if not $currentquiet;  
+
+ 
+  # ==TEXT SURFACE GENERATOR ===================================================================================================
+  # On GTK2 we used to create a 32k pixels wide surface and operate on that, but
+  # with GTK3 the paint operation alone takes forever on an older computer,
+  # so we resort to growing the surface as needed nowdays.
+
+  print $thismarge."P02a- maxwidth:".$maxwidth. "  lastwidth: ". $lastwidth ." \n" if not $currentquiet;  
+  print $thismarge."P02b- max_pix_bufferlength:".$max_pix_bufferlength. "  totalpicture_width_px: ". $totalpicture_width_px ." \n" if not $currentquiet; 
+  #print $thismarge."Text-generator -start- \n"  if not $currentquiet;
+  if (($maxwidth-100)<$lastwidth) {
+    $maxwidth=$lastwidth+100;
+    if ($maxwidth>($max_pix_bufferlength - $totalpicture_width_px)) {
+       $maxwidth=$max_pix_bufferlength - $totalpicture_width_px;   # 32767 is 6143 mm,  tapes can vary from 3000 to 8000 mm, maybe there are larger sizes but max int value is about 32767
+    } 
+  }
+  print $thismarge."P03a- maxwidth:".$maxwidth." \n" if not $currentquiet;  
+  print $thismarge."P03b- fixed_labelwidth_pix:".$fixed_labelwidth_pix. "  totalpicture_width_px: ". $totalpicture_width_px ." \n" if not $currentquiet;  
+  # enlarge the surface where the text is generated in order to get the emty space that is needed to fit the text to the fixed label length
+  if ($fixed_labelwidth_pix > 0) {
+    # the room for the images should be subtracted of the text space in order to avoid problems with the total label width exeeding 32767 pix 
+   
+    my $tmp_fixed_width = $fixed_labelwidth_pix - $totalpicture_width_px;
+    print $thismarge."P04a- maxwidth:".$maxwidth. "  tmp_fixed_width: ". $tmp_fixed_width ." \n" if not $currentquiet;  
+    
+    if ($tmp_fixed_width > 0) {
+       if ($tmp_fixed_width > $maxwidth) {
+          $maxwidth = $tmp_fixed_width;
+       }
+    } 
+    #$maxwidth = $fixed_labelwidth_pix - $totalpicture_width_px;
+    print $thismarge."P04b- maxwidth:".$maxwidth. "  max_pix_bufferlength: ". $max_pix_bufferlength ." \n" if not $currentquiet;  
+
+    if ($maxwidth>($max_pix_bufferlength - $totalpicture_width_px)) {
+       $maxwidth=$max_pix_bufferlength - $totalpicture_width_px;   # 32767 is 6143 mm,  tapes can vary from 3000 to 8000 mm, maybe there are larger sizes
+    } 
+    print $thismarge."P04c- maxwidth:".$maxwidth. " \n" if not $currentquiet;  
+
+  }
+  print $thismarge."P05- maxwidth:".$maxwidth. "  lastwidth: ". $lastwidth ." \n" if not $currentquiet;  
+  
+  
+  my $alarmcolor = "reset";
+  if ( $maxwidth <= 0){ $alarmcolor = "red";}
+  print $thismarge. color($alarmcolor)."surfacecreate-maxwidth: " . $maxwidth . color("reset")."  current_tapeheight: ".$current_tapeheight."\n"  if not $currentquiet;
+  
+  # create context $cr of the surface
+  #&surfacecreate($maxwidth, $current_tapeheight);
+  # Recreates the surface if the dimensions change.
+  
+  print $thismarge."P06a- maxwidth:".$maxwidth. " \n" if not $currentquiet;  
+  print $thismarge."P06b- current_tapeheight:".$current_tapeheight. " \n" if not $currentquiet;  
+  if (($maxwidth!=$surface_width) || ($current_tapeheight!=$surface_height)) {
+    $surface=Cairo::ImageSurface->create('rgb24', $maxwidth, $current_tapeheight);
+    $cr=Cairo::Context->create($surface); 
+  }
+ 
+  # == PANGO OPERATIONS ON TEXT =======================================================================================
+  # connect the the pango_layout surface to the cr surfacecontext 
+  my $pango_layout=Pango::Cairo::create_layout($cr);
+  # my $pango_outout;
+  
+  $pango_layout->set_alignment(lc($halign->get_active_id()));
+  $pango_layout->set_spacing(-5000);
+ 
+  $cr->rectangle(0, 0, $maxwidth, $current_tapeheight);
+  
+  # set the color for the bckground to the right color
+  if ($inverse->get_active) {
+    $cr->set_source_rgb(@foreground);
+  } else {
+    $cr->set_source_rgb(@background);
+  }
+  $cr->fill;   # fill background in the right color
+
+  # set the color for the text to the right color
+  if ($inverse->get_active) {
+    $cr->set_source_rgb(@background);
+  } else {
+    $cr->set_source_rgb(@foreground);
+  }
+  $textstate ="";
+  
+  $add_to_buffer->set_sensitive(1);
+  # check the labeltext input fields
+  if (($entry[1]->get_text eq "") && ($entry[2]->get_text eq "") && ($entry[3]->get_text eq "") && ($entry[4]->get_text eq "")) {
+     # If fields are empty > show preview text
+     print $thismarge.">>> Preview text\n" if not $currentquiet;
+
+     my $effects="";
+     if ($strikethrough[1]->get_active) { $effects=$effects." strikethrough=\"true\""; }
+     if ($underline[1]->get_active) { $effects=$effects." underline=\"single\""; }
+
+     $pango_output="<span$effects font=\"".$fontselect[1]->get_font_name()."\">Preview</span>";
+
+     # Turn off the printing button too.
+     $print_now->set_sensitive(0);
+     $add_to_buffer->set_sensitive(0);
+     $textstate ="ok";
+
+  } else { 
+     print $thismarge.">>> User text\n" if not $currentquiet;
+     
+     my $needcr=0;
+     $pango_output="";
+     # loop along the 4 text lines
+     for (my $i=1; $i<5; $i++) {
+         # add carriage return if needed (when there is text on the current line)
+         if (($needcr!=0) && ($entry[$i]->get_text ne "")) {
+           $pango_output=$pango_output."\n";
+           $needcr=0;
+         }
+
+         my $effects="";
+         if ($strikethrough[$i]->get_active) { $effects=$effects." strikethrough=\"true\""; }
+         if ($underline[$i]->get_active) { $effects=$effects." underline=\"single\""; }
+
+         print $thismarge."Line $i: ".$entry[$i]->get_text."\n" if not $currentquiet;
+         if ($entry[$i]->get_text ne "") {
+           $pango_output=$pango_output."<span$effects font=\"".$fontselect[$i]->get_font_name()."\">".&escape($entry[$i]->get_text)."</span>";
+           $needcr=1;
+         }
+     }
+
+     # Enable the printing button if printer is something else than the default "none" entry.
+     if ($printerselect->get_active_text ne "None") {
+       $print_now->set_sensitive(1);
+       #$add_to_buffer->set_sensitive(1);
+       $textstate ="ok";
+     } 
+  }
+
+  print $thismarge."Pango markup:\n"  if not $currentquiet;
+  print $thismarge."------\n"         if not $currentquiet;
+  print $thismarge.$pango_output      if not $currentquiet;
+  print $thismarge."------\n"         if not $currentquiet;
+  
+  # fill the pango_layout with the formatted text
+  $pango_layout->set_markup($pango_output);
+
+  print $thismarge."Horizontal alignment: ".$halign->get_active_text."\n" if not $currentquiet;
+  print $thismarge."Vertical alignment: ".$valign->get_active_text."\n" if not $currentquiet;
+  
+  # determine the size of the rectangle with text for aligning it vertical
+  my ($pango_width_px, $ysize)=$pango_layout->get_pixel_size();  
+  if ($valign->get_active_id eq "top") { $cr->move_to(0, 0); }
+  if ($valign->get_active_id eq "middle") { $cr->move_to(0, ($current_tapeheight/2)-($ysize/2)); }
+  if ($valign->get_active_id eq "bottom") { $cr->move_to(0, $current_tapeheight-$ysize); }
+
+  Pango::Cairo::show_layout($cr, $pango_layout);
+
+  $cr->show_page();
+  
+
+  my $surf_width=$surface->get_width;
+  my $height=$surface->get_height;
+  my $stride=$surface->get_stride;
+  my $data=$surface->get_data;
+  
+  $lastwidth=$pango_width_px;
+  print $thismarge."A01- pango_width_px:".$pango_width_px. "  ysize: ". $ysize ." \n" if not $currentquiet;  
+  print $thismarge."A02- surf_width:".$surf_width. "  height: ". $height ." \n" if not $currentquiet;  
+  print $thismarge."A03- stride:".$stride." \n" if not $currentquiet;  
+ 
+  my $text_width_px = $pango_width_px;
+  print $thismarge."A1- text_width_px:".$text_width_px. "  pango_width_px: ". $pango_width_px ." \n" if not $currentquiet;  
+  print $thismarge."A2- Text-generator -end- \n"  if not $currentquiet;
+
+   
+  # ==FIXED TEXTROOM WIDTH ===================================================================================================
+  # before combining the text we have to determine the fixed available space for the text
+
+  my $fixed_text_room_pix = $fixed_labelwidth_pix;
+  my $display_text_width_px = $text_width_px; # from pangotextwidth
+
+  print $thismarge."B1- display_text_width_px:".$display_text_width_px. "  fixed_text_room_pix: ". $fixed_text_room_pix ." \n" if not $currentquiet;  
+  print $thismarge."C1- fixed_labelwidth_pix:" . $fixed_labelwidth_pix . " fixed_labelwidth_mm: " . $fixed_labelwidth_mm. "\n"  if not $currentquiet;  
+  
+  # there is no eleasticity in the pics, so we subtract the total pix size from the fixed width
+
+ 
+  my $style;
+  my $stylecontext = $label_width_mm->get_style_context();
+  print $thismarge."C2- fixed_labelwidth_pix:".$fixed_labelwidth_pix. "  \n" if not $currentquiet;  
+  if ($fixed_labelwidth_pix > 0) {
+  
+        print $thismarge."C3- fixed_labelwidth_pix:".$fixed_labelwidth_pix. "  totalpicture_width_px: ". $totalpicture_width_px ." \n" if not $currentquiet;  
+        if ($fixed_labelwidth_pix < $totalpicture_width_px) {
+            # no room left for text
+            $fixed_text_room_pix = 0;
+            $textstate = "";  #no text is printed
+            
+        } else {
+            $fixed_text_room_pix = $fixed_labelwidth_pix - $totalpicture_width_px;
+        }
+        
+        $display_text_width_px = $fixed_text_room_pix;
+        
+        print $thismarge."C4- display_text_width_px:".$display_text_width_px. "  fixed_text_room_pix: ". $fixed_text_room_pix ." \n" if not $currentquiet;  
+       
+        print $thismarge."C5- set backgroundcolor van label_width_mm" . "\n"  if not $currentquiet;  
+       # my $color = "green";
+        if ($fixed_text_room_pix < $text_width_px) {
+                # the text is to big for the mandatory space and needs to be cut-off
+                # make the  calculated text width field in the window red
+                # $style = "* { background: ".$color."; }";
+                $style = "* { background-color: #ff7a78;}";
+        } else {
+                $style = "* { background: none ; }";
+        }
+        $css->load_from_data($style);
+        $stylecontext->add_provider($css,1);               
+        
+  } else {
+  
+     $style = "* { background: none ; }";
+     $css->load_from_data($style);
+     $stylecontext->add_provider($css,1);
+  }
+  
+  # == COMBINE PICS AND TEXT =======================================================================================
+  # calculate the raw label size with the uncut text size
+  print $thismarge."C6- totalpicture_width_px:".$totalpicture_width_px. "  display_text_width_px: ". $display_text_width_px ." \n" if not $currentquiet;  
+  $single_width_px = $totalpicture_width_px + $display_text_width_px;
+ 
+  # calculate the uncut total with in mm
+  # $total_width_mm = $single_width_px / 5.333333;
+ 
+  
+  $label_width_mm->set_text(&pixel_to_mm(($totalpicture_width_px + $text_width_px), $mm_pix_conversionrate) + $vertmarge);
+ 
+  print $thismarge."B7- single_width_px:".$single_width_px." \n" if not $currentquiet;  
+  my $max_text_width_px=$display_text_width_px;
+   
+  print $thismarge."step A  \n"  if not $currentquiet;    
+  my $pixbuf_height=0;
+  my $pixbuf_width=0;
+  my $main_pixbuf_height=0;
+  my $main_pixbuf_width=0;
+  
+  print $thismarge."step B  \n"  if not $currentquiet;    
+  $total_width_px = $repeat * $single_width_px;
+  
+  # check if the repeat pushes the complete labellength over the maximum buffer size
+  if ( $total_width_px > $max_pix_bufferlength ){
+  
+    my $max_repeat = int(($max_pix_bufferlength / $single_width_px) ) ;
+    if ($max_repeat < 1 ) {
+            $max_repeat = 1;
+    }
+    $repeatcount->set_text($max_repeat);
+    $repeat = $max_repeat;
+    $total_width_px = $repeat * $single_width_px;
+  }
+
+  $total_setwidth_mm->set_text(&pixel_to_mm($total_width_px, $mm_pix_conversionrate) + $vertmarge);
+  print $thismarge."step C  \n"  if not $currentquiet;    
+  
+  
+  #print "Width  : $pango_width_px/$maxwidth (Last: $lastwidth) \n" if not $currentquiet;
+  print $thismarge."Active printer: ".$printerselect->get_active_text."\n" if not $currentquiet;
+  
+  print $thismarge."(pango_layout) width: $pango_width_px\n" if not $currentquiet;
+  print $thismarge."maxwidth: $maxwidth\n" if not $currentquiet;
+  print $thismarge."lastwidth: $lastwidth\n" if not $currentquiet;
+  print $thismarge."stride: $stride\n" if not $currentquiet;
+  print $thismarge."(surface) height: $height\n" if not $currentquiet;
+  print $thismarge."totalpicture_width_px_netto: $totalpicture_width_px_netto  (all pics summed up without divider pic) \n" if not $currentquiet;
+   
+  print $thismarge."================================================= \n" if not $currentquiet;
+  print $thismarge."+ display_text_width_px: $display_text_width_px  (gehaald van pangowidth, gechecked tegen fixedwidth) \n" if not $currentquiet;
+  print $thismarge."+ totalpicture_width_px: $totalpicture_width_px  (all pics summed up incl divider pic) \n" if not $currentquiet;
+  print $thismarge."--------- \n" if not $currentquiet;
+  print $thismarge."= single_width_px: $single_width_px\n" if not $currentquiet;
+  print $thismarge."repeat: $repeat\n" if not $currentquiet;
+  print $thismarge."---------- \n" if not $currentquiet;
+  print $thismarge."repeat x single_width_px = ".$single_width_px * $repeat. "\n" if not $currentquiet;
+  print $thismarge."- headerwidth_dv: $headerwidth_dv\n" if not $currentquiet;
+  print $thismarge."--------- \n" if not $currentquiet;
+  print $thismarge."total_with: $total_width_px\n \n" if not $currentquiet;
+
+  
+  print $thismarge."M1- create main_pixbuf using total_width_px: $total_width_px\n" if not $currentquiet;
+
+  # create a blank workcanvas with Gtk3::Gdk::Pixbuf
+  my $main_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $total_width_px,  $height);
+  my $xpixbuf; 
+  #=====================================
+#  if ($display_text_width_px > 0) {
+   # create an  image of the pangotext in a Gtk3::Gdk::Pixbuf
+  if ($display_text_width_px > 0 ) {
+        print $thismarge."M2A- create xpixbuf using display_text_width_px: ".$display_text_width_px ."  height: ".$height."\n" if not $currentquiet;
+        if ($data) {
+            print $thismarge."M2A- create xpixbuf: data  exists \n" if not $currentquiet;
+        } else
+        {
+            print $thismarge."M2A- create xpixbuf: ". color("red")." data does not exist ". color("reset")."\n" if not $currentquiet;
+        }
+        print $thismarge."M2A- display_text_width_px: $display_text_width_px\n" if not $currentquiet;
+        print $thismarge."M2A -height: $height\n" if not $currentquiet;      
+        print $thismarge."M2A -stride: $stride\n" if not $currentquiet;      
+        
+        $xpixbuf=Gtk3::Gdk::Pixbuf->new_from_data($data, 'rgb', TRUE, 8, $display_text_width_px, $height, $stride);
+
+        $pixbuf_height = $height;
+        $pixbuf_width = $display_text_width_px;
+        print $thismarge."M2B- text xpixbuf_height: $pixbuf_height\n" if not $currentquiet;
+        print $thismarge."M2C -text xpixbuf_width: $pixbuf_width\n" if not $currentquiet;        
+   } else {
+   
+     print $thismarge."M2D- xpixbuf not created - display_text_width_px: ".$display_text_width_px ."  height: ".$height."\n" if not $currentquiet;  
+   }
+ # }
+  
+  $main_pixbuf_height = $main_pixbuf->get_height();
+  $main_pixbuf_width  = $main_pixbuf->get_width();
+  
+  print $thismarge."M3- main_pixbuf_height: $main_pixbuf_height\n" if not $currentquiet;
+  print $thismarge."M4- main_pixbuf_width: $main_pixbuf_width\n" if not $currentquiet;
+
+  print $thismarge."Image combiner start ------- \n"  if not $currentquiet;
+  
+   
+ 
+  # kopieer de images in de buffer op de juiste locatie
+  my $single_ptr=0;  # pointer in the single buffer for placing the images and text at the right X location
+ #  my $trepeat=$repeat - 1;
+  for (my $ri=1; $ri <= $repeat; $ri++) {
+  
+    if ( $ri == 1) { # at the beginning of the first repeat
+       if ($headerstate_dv eq "ok") {
+          my $headerwidth_dv_right_half = $right_divider_imageobject->get_width;
+          # $single_ptr = $single_ptr + $headerwidth_dv_half;  # if a divider pic = choosen then there will be space for it , even if repeat = 1
+          print $thismarge."start $ri headerpic dv right half - in main_pixbuf at position $single_ptr \n" if not $currentquiet;
+          $right_divider_imageobject->copy_area( 0, 0, $headerwidth_dv_right_half  , $headerheight_dv , $main_pixbuf, $single_ptr, 0);
+          $single_ptr = $single_ptr + $headerwidth_dv_right_half;  # if a divider pic = choosen then there will be space for it , even if repeat = 1    
+       }
+    }    
+    if ($headerstate_ol eq "ok") {
+        print $thismarge."start $ri headerpic ol - ". $headerfile_ol_filename ." in main_pixbuf at position $single_ptr \n" if not $currentquiet;
+        $headerpic_ol->copy_area( 0, 0, $headerwidth_ol  , $headerheight_ol , $main_pixbuf, $single_ptr, 0);
+        $single_ptr = $single_ptr + $headerwidth_ol;
+    }
+    
+    if ($headerstate_il eq "ok") {
+        print $thismarge."start $ri headerpic il - ". $headerfile_il_filename ." in main_pixbuf at position $single_ptr \n" if not $currentquiet;
+        $headerpic_il->copy_area( 0, 0, $headerwidth_il  , $headerheight_il , $main_pixbuf, $single_ptr, 0);
+        $single_ptr = $single_ptr + $headerwidth_il;
+    }
+    
+    if ($display_text_width_px > 0 ) {
+
+        # add text part
+        if ($textstate eq "ok") {
+            print $thismarge."start $ri text: add textpart in mainloop_teller: ". $mainloop_teller." \n" if not $currentquiet;
+            print $thismarge."start $ri text: copy xpixbuf in main_pixbuf op locatie: $single_ptr\n" if not $currentquiet;
+            print $thismarge."start $ri text:  pixbuf_width:".$pixbuf_width. "  pixbuf_height: ". $pixbuf_height ." \n" if not $currentquiet;  
+            if ($main_pixbuf) {
+                print $thismarge."start $ri text: main_pixbuf exists \n" if not $currentquiet;
+            } else
+            {
+                print $thismarge."start $ri text: main_pixbuf does not exist \n" if not $currentquiet;
+            }
+            
+            if ($xpixbuf) {
+                print $thismarge."start $ri text: xpixbuf exist \n" if not $currentquiet;
+            } else
+            {
+                print $thismarge."start $ri text: xpixbuf does not exist \n" if not $currentquiet;
+            }
+            $xpixbuf->copy_area( 0, 0,$pixbuf_width  , $pixbuf_height  , $main_pixbuf, $single_ptr, 0);
+            $single_ptr = $single_ptr + $pixbuf_width;
+        }
+    }
+  
+    if ($headerstate_ir eq "ok") {
+        print $thismarge."start $ri headerpic ir - ". $headerfile_ir_filename ."  in main_pixbuf at position $single_ptr \n" if not $currentquiet;
+        $headerpic_ir->copy_area( 0, 0, $headerwidth_ir  , $headerheight_ir , $main_pixbuf, $single_ptr, 0);
+        $single_ptr = $single_ptr + $headerwidth_ir;
+    }
+    
+    if ($headerstate_or eq "ok") {
+        print $thismarge."start $ri headerpic or - ". $headerfile_or_filename ." in main_pixbuf at position $single_ptr \n" if not $currentquiet;
+        $headerpic_or->copy_area( 0, 0, $headerwidth_or  , $headerheight_or , $main_pixbuf, $single_ptr, 0);
+        $single_ptr = $single_ptr + $headerwidth_or;
+    }
+   
+    if ($ri == $repeat) {    
+       if ($headerstate_dv eq "ok") {
+          my $headerwidth_dv_left_half = $left_divider_imageobject->get_width;
+          # $single_ptr = $single_ptr + $headerwidth_dv_half;  # if a divider pic = choosen then there will be space for it , even if repeat = 1
+          print $thismarge."start $ri headerpic dv left half - in main_pixbuf at position $single_ptr \n" if not $currentquiet;
+          $left_divider_imageobject->copy_area( 0, 0, $headerwidth_dv_left_half  , $headerheight_dv , $main_pixbuf, $single_ptr, 0);
+          
+          $single_ptr = $single_ptr + $headerwidth_dv_left_half;  # if a divider pic = choosen then there will be space for it , even if repeat = 1
+   
+        }          
+         
+        
+    } else {  # at the end of the last repeat
+       if ($headerstate_dv eq "ok") {
+                print $thismarge."start $ri headerpic dv - ". $headerfile_dv_filename ." in main_pixbuf at position $single_ptr \n" if not $currentquiet;
+                $headerpic_dv->copy_area( 0, 0, $headerwidth_dv  , $headerheight_dv , $main_pixbuf, $single_ptr, 0);
+                $single_ptr = $single_ptr + $headerwidth_dv;
+       }
+    }
+  }
+  
+  print $thismarge."Image combiner end ------- \n"  if not $currentquiet;
+  print $thismarge."main_pixbuf->get_height(): ". $main_pixbuf->get_height()."\n" if not $currentquiet;
+  print $thismarge."main_pixbuf->get_width():". $main_pixbuf->get_width()."\n" if not $currentquiet;
+  
+  # determine if this labelset can be added to the set buffer or that it exeeds the buffer limit
+  my $grandbuffertotal_width =0;
+  if (!&check_maxbuffer_size($total_width_px,$max_pix_bufferlength)){
+     $add_to_buffer->set_sensitive(0);
+  }
+  
+  print $debugbasemarge."#}render_text\n" if not $quiet;
+
+  return $main_pixbuf;  
+}  
+sub check_maxbuffer_size {
+  my $thismarge = "   ";
+  # determine if this labelset can be added to the set buffer or that it exeeds the buffer limit
+  my $grandbuffertotal_width =0;
+  my $i=0;
+  my $tp_width=0;
+  for (keys %image_buffers) {
+        print $thismarge."buffer subimage". $i ;
+        my $t_pixbuf =  $image_buffers{$_};
+        $tp_width = $t_pixbuf->get_width;
+        $grandbuffertotal_width = $grandbuffertotal_width + $tp_width;
+        print $thismarge." size image width : ".$tp_width."\n"; 
+        $i++;
+  }
+  if (($_[0] + $grandbuffertotal_width) > $_[1]) {
+    return(FALSE);
+  }
+  return(TRUE);
+}
+
+# Loads and scales a picture
+# 0: Image file name
+# 1: Max Y height
+sub image_load_resize {
+    # ($headerpic, $headerstate)=&image_load_resize($headerfile->get_filename, $current_tapeheight);
+    my $thisquiet= $quiet;
+    $thisquiet = TRUE;
+    my $thismarge = " ";
+    print "#image_load_resize{\n" if not $thisquiet;
+
+    my $imagefile=$_[0];
+    my $requestheight=$_[1];
+    
+    print "imagefile: ".$imagefile." requestheight: ".$requestheight."\n" if not $thisquiet;
+    
+    if (! defined($imagefile)) {
+        print "#}image_load_resize\n" if not $thisquiet;
+        return "", "notused";
+    }
+
+    if (not (-f $imagefile)) {
+        print "#}image_load_resize\n" if not $thisquiet;
+        return "", "notfound";
+    }
+    
+    print $thismarge."imagefile =".$imagefile."\n" if not $thisquiet;
+    print $thismarge."requestheight =".$requestheight."\n" if not $thisquiet;
+    my $imageobject=Gtk3::Gdk::Pixbuf->new_from_file($imagefile) || return "", "notfound";
+    my $imgwidth=$imageobject->get_width;
+    my $imgheight=$imageobject->get_height;
+    my $imgratio=$imgwidth/$imgheight;
+    
+    # If the picture isn't exactly how tall we need it to be, we need to resize.
+    if ($imgheight!=$requestheight) {
+        my $scaledimage=$imageobject->scale_simple(floor(($requestheight*$imgratio)), $requestheight, 'tiles');
+        print "#}image_load_resize\n" if not $thisquiet;
+        return $scaledimage, "ok";
+    } else {
+        print "#}image_load_resize\n" if not $thisquiet;
+        return $imageobject, "ok";
+    }
+    
+}
+
+# splits een dividerpicture in een linker en een rechterdeel om ze aan tweekanten van het label te plakken
+sub divider_split {
+   my $thisquiet= $quiet;
+   print "#divider_split{ --\n" if not $thisquiet;
+   $thismarge="  ";
+   
+   # layout of the function
+   # ($left_div_pixbuf, $right_div_pixbuf)=&divider_split($dividerbuffer);
+ 
+   my $divider_buffer=$_[0];
+   my $buf_height=$divider_buffer->get_height;
+   my $left_buf_width = int(($divider_buffer->get_width / 2) + 0.5);
+   my $right_buf_width  = $divider_buffer->get_width - $left_buf_width;
+   #gdk_pixbuf_new_subpixbuf (GdkPixbuf *src_pixbuf, int src_x, int src_y, int width, int height);
+   print $thismarge." left_buf_width =".$left_buf_width." right_buf_width =".$right_buf_width ." buf_height =".$buf_height."\n" if not $thisquiet;
+ 
+   my $left_div_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $left_buf_width,  $buf_height);
+   $divider_buffer->copy_area( 0, 0, $left_buf_width  , $buf_height , $left_div_pixbuf, 0, 0);
+    
+   my $right_div_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $right_buf_width,  $buf_height);
+   $divider_buffer->copy_area( $left_buf_width, 0, $right_buf_width  , $buf_height , $right_div_pixbuf, 0, 0);
+
+   print "} divider_split --\n" if not $thisquiet;
+   return $left_div_pixbuf, $right_div_pixbuf;
+}
+
+# insert een 9 mm blok in een 12 mm canvas om te printen 
+# direct 12 mm kiezen gaat niet omdat dan de tekst niet realistisch wordt weergegeven in de preview
+sub resize_labelblok {
+   my $thisquiet= $quiet;
+   print "#resize_labelblok{ --\n" if not $thisquiet;
+   $thismarge="  ";
+   
+   # layout of the function
+   # ($left_div_pixbuf, $right_div_pixbuf)=&resize_labelblok($dividerbuffer);
+ 
+   my $org_buffer=$_[0];
+   my $org_tapetype=$_[1]; #6,9,12,18,24
+   my $orgbuf_height=int($org_buffer->get_height);  #als het goed is 48
+   my $newbuf_height=0;  # hoogte van 12 mm tape   
+   my $newbuf_width=0;  # breedte van nieuw label   
+
+   my $orgbuf_width = int($org_buffer->get_width);  # breedte blijft ongewijzigd
+   #my $new_div_pixbuf = $org_buffer;
+
+   #gdk_pixbuf_new_subpixbuf (GdkPixbuf *src_pixbuf, int src_x, int src_y, int width, int height);
+   #print $thismarge." left_buf_width =".$left_buf_width." right_buf_width =".$right_buf_width ." buf_height =".$buf_height."\n" if not $thisquiet;
+   print $thismarge." org_tapetype = ".$org_tapetype."\n";
+   print $thismarge." org_buf_width = ".$org_buf_width."\n";
+   
+   if ($org_tapetype==6) {  # heigth 32
+      $newbuf_height=32;
+      print $thismarge." type 6 -> orgbuf_height =".$orgbuf_height ." newbuf_height =".$newbuf_height."\n" if not $thisquiet;
+      return $org_buffer;
+   }
+
+   if ($org_tapetype==9) {  # heigth 48
+       # $newbuf_height=48;
+       $newbuf_height=56;
+       print $thismarge." type 9 -> orgbuf_height =".$orgbuf_height ." newbuf_height =".$newbuf_height."\n" if not $thisquiet;
+       return $org_buffer;
+       #my $new_div_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $org_buf_width,  $newbuf_height);
+  
+       #print $thismarge." orgbuf_height =".$orgbuf_height ." newbuf_height =".$newbuf_height."\n" if not $thisquiet;
+       #$org_buffer->copy_area( 0, 0, $org_buf_width  , $orgbuf_height , $new_div_pixbuf, 0, 8);
+   }
+   
+   if ($org_tapetype==12) {  # heigth 64
+      $newbuf_height=64;
+       print $thismarge." type 12 -> orgbuf_height =".$orgbuf_height ." newbuf_height =".$newbuf_height."\n" if not $thisquiet;
+       return $org_buffer;
+   }
+   
+   if ($org_tapetype==18) { # heigth 96
+       $newbuf_height=96;
+       print $thismarge." type 18 -> orgbuf_height =".$orgbuf_height ." newbuf_height =".$newbuf_height."\n" if not $thisquiet;
+       return $org_buffer;
+   }
+   
+   if ($org_tapetype==24) { # heigth 128
+       $newbuf_height=128;
+       print $thismarge." type 24 -> orgbuf_height =".$orgbuf_height ." newbuf_height =".$newbuf_height."\n" if not $thisquiet;
+       return $org_buffer;
+   }
+
+   
+   if ($org_tapetype==0) {  # heigth 64
+       
+       
+       return $org_buffer;
+       
+       $buf_scale = 1 / 9 ;
+       $buf_scale = int($buf_scale * 12 );
+       
+       $newbuf_height= int($orgbuf_height * $buf_scale);
+       $newbuf_width= int($orgbuf_width * $buf_scale) ;
+       
+       print $thismarge." type 12 -> orgbuf_height =".$orgbuf_height ." org_buf_width =".$orgbuf_width."\n" if not $thisquiet;
+       print $thismarge." convert to: newbuf_height =".$newbuf_height." newbuf_width =".$newbuf_width."\n" if not $thisquiet;
+       
+       #my $new_div_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $orgbuf_width,  $newbuf_height);
+       #$org_buffer->copy_area( 0, 0, $orgbuf_width  , $orgbuf_height , $new_div_pixbuf, 0, 8);
+       
+       my $new_div_pixbuf = $org_buffer->scale_simple($newbuf_width  , $newbuf_height , GDK_INTERP_BILINEAR);
+       
+        
+       print $thismarge." result: new_div_pixbuf->get_width =".int($new_div_pixbuf->get_width)." new_div_pixbuf->get_height =". int($new_div_pixbuf->get_height)."\n" if not $thisquiet;
+       return $new_div_pixbuf;
+   }   
+   
+   # my $left_div_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $left_buf_width,  $newbuf_height);
+   # $org_buffer->copy_area( 0, 0, $left_buf_width  , $newbuf_height , $left_div_pixbuf, 0, 0);
+   # my $right_div_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $right_buf_width,  $newbuf_height);
+   # $org_buffer->copy_area( $left_buf_width, 0, $right_buf_width  , $newbuf_height , $right_div_pixbuf, 0, 0);
+   
+   print "} resize_labelblok --\n" if not $thisquiet;
+   
+   #return $left_div_pixbuf, $right_div_pixbuf;
+   return $new_div_pixbuf;
+}
+
+  
+
+
+#set alarmcolor on a label on screen
+sub set_lbl_color { 
+    my $debugbasemarge=$_[1];
+    my $thismarge = $debugbasemarge."  ";
+    #debugging
+    my $thisquiet= $quiet;
+    
+    
+    my $css_t = Gtk3::CssProvider->new();
+    print $debugbasemarge."# set_lbl_color { \n" if not $thisquiet;
+    #my $label_widget = $_[0];
+    my $lbl_color =  $_[2];
+    #$lbl_color="green";
+    my $style = "";
+    if ($_[2] eq "alarmred") {
+        #  #ff7a78 reddish
+        #  none  > reset to normal background
+        $lbl_color = $blabel2_alarmcolor;
+    } 
+    print $thismarge."lbl_color = ".$lbl_color." --\n" if not $thisquiet;
+    if ($_[2] eq "none") {    
+       $style = "* { background: ".$lbl_color." ; }";
+    } else {
+       $style = "* { background-color: ".$lbl_color.";}";
+    }
+    my $stylecontext = $_[0]->get_style_context();
+    $css_t->load_from_data($style);
+    $stylecontext->add_provider($css_t,1);  
+    print $debugbasemarge."# } set_lbl_color \n" if not $thisquiet;
+}
+
+
+
+# Pulls image data for the sticker in works and puts that into the image area.
+# Called as a GTK3 signal as a reaction to any changes in the GUI.
+sub update_preview {
+  my $debugbasemarge=$_[0];
+  my $thismarge = "  ".$debugbasemarge;
+
+  my $thisquiet= $quiet;
+  #$thisquiet=TRUE;
+  
+  print $debugbasemarge."#update_preview { \n" if not $thisquiet;
+  
+  # get the rendered preview image (without margins)
+  my $temppixbuf=&render_text($thismarge);
+  
+  # fixed marge at printtime is about 3mm left and 3mm right side
+  my $marge_pix = int((3 * $mm_pix_conversionrate ) + 0.5);
+  # print $debugbasemarge." -added margepix : $marge_pix\n" if not $thisquiet;
+
+  
+  my $preview_pixbuf_height = $temppixbuf->get_height();
+  my $preview_pixbuf_width  = $temppixbuf->get_width() + ( 2 * $marge_pix);
+  # print $debugbasemarge." -temppixbuf width :".$temppixbuf->get_width()."\n" if not $thisquiet;
+  
+  # create a new canvas with the margins included
+  my $preview_pixbuf=Gtk3::Gdk::Pixbuf->new ('rgb',  TRUE,  8,  $preview_pixbuf_width,  $preview_pixbuf_height);
+ 
+  my $fillpixel = 0xffffffff;  # this pixel is white opaque
+  # fill the basic canvas all with white pixels otherwise it won't display on screen
+  $preview_pixbuf->fill($fillpixel);  
+  # copy the preview image on the new canvas
+  $temppixbuf->copy_area( 0, 0,$temppixbuf->get_width()  , $preview_pixbuf_height  , $preview_pixbuf, $marge_pix, 0);
+  
+  # print $debugbasemarge." -preview width :".$preview_pixbuf->get_width()."\n" if not $thisquiet;
+  
+  # put the new enlarged canvas on the preview location on screen
+  $preview->set_from_pixbuf($preview_pixbuf);
+  $viewscrolled=1;
+  print $debugbasemarge."#}update_preview\n" if not $thisquiet;
+}
+
+
+
+# Moves the scroll bar to the right if the window is too small for the whole sticker.
+# Called as a GTK3 signal after the preview area has been redrawn.
+sub scroll_preview {
+  if ($viewscrolled) {
+    my $hadj=$previewscroll->get_hadjustment;
+
+    $hadj->set_value($hadj->get_upper-$hadj->get_page_size);
+    $previewscroll->set_hadjustment($hadj);
+    $viewscrolled=0;
+  }
+}
+
+sub sig_print_now {
+  my $thismarge = "";
+  my $thisquiet= $quiet;
+  $thisquiet=FALSE;
+  print "#sig_print_now { \n" if not $thisquiet;
+   &print_now;
+  print "}sig_print_now \n" if not $thisquiet;  
+}
+
+# Pulls the image data, saves it as a temporary PNG file and feeds that into the
+# printing program.
+sub print_now {
+  my $thismarge = " ";
+  my $thisquiet= $quiet;
+  $thisquiet=FALSE;
+  print "#print_now { \n" if not $thisquiet;
+  my $imagedata=&render_text($thismarge);
+  
+  my $current_tapeheight = &get_tape_height($thismarge);
+  # relocate 9mm (preview)blok op de 12 mm ruimte van de standaard 9mm cassete
+  
+#  } elsif ($tapetype->get_active_id() eq "9") {
+#    $tapeheight=48;
+#  } elsif ($tapetype->get_active_id() eq "12") {
+#    $tapeheight=64;
+
+
+
+  print $thismarge." current_tapeheight".$current_tapeheight." \n" if not $thisquiet;
+  #if ($tapetype->get_active_id() eq "9") {
+  #if ($tapetype->get_active_id() eq "0") {
+  #  ($imagedata)=&resize_labelblok($imagedata,$tapetype->get_active_id());
+  #}
+  #}
+ #@@@@@
+  
+  my $autocutparam="";
+  my $quietparam="";
+  my $inverseparam="";
+  if ($autocut->get_active) {
+    $autocutparam="--autocut";
+  }
+  if ($quiet) {
+    $quietparam="--quiet";
+  }
+  if ($inverse->get_active) {
+        $inverseparam="--inverse";
+  }
+  my $currenttapetype="--tapetype=".$tapetype->get_active_id()  ;
+   
+  $imagedata->save($tempfilename, "png");
+  #system("blabel-print", "--file=".$tempfilename, "--printer=".$printerselect->get_active_text, $autocutparam, $quietparam);
+  system(PRINTPROGRAM, "--file=".$tempfilename, "--printer=".$printerselect->get_active_text, $currenttapetype, $autocutparam, $quietparam, $inverseparam);
+
+  # If we're in oneshot mode, bail out.
+  if ($oneshot) {
+    print $thismarge."Oneshot enabled, exiting.\n" if not $quiet;
+    print "#}print_now\n" if not $thisquiet;
+    &main_quit;
+  }
+  print "}print_now\n" if not $thisquiet;
+}
+
+# Called from main window's quit button, quits the program
+sub main_quit {
+  Gtk3->main_quit;
+  unlink($tempfilename);
+  unlink($tempfilenamebuf);
+  if (! $nosave) {
+    &save_config;
+  }
+  print "Thanks for using BLabel2 !\n" if not $quiet;
+  exit;
+}
+#=============================
+
+
+# ==PRESET FUNCTIONS ===================================================================================================
+# functions regarding the handling of the preset configfiles 
+
+
+sub preset_0 {
+   $preset_conf = "0";
+   &preset_conf;
+}
+sub preset_1 {
+   $preset_conf =  "1";
+  &preset_conf;
+}
+sub preset_2 {
+   $preset_conf =  "2";
+   &preset_conf;
+}
+sub preset_3 {
+    $preset_conf =  "3"; 
+   &preset_conf;
+}
+sub preset_4 {
+   $preset_conf =  "4";
+   &preset_conf;
+}
+sub preset_5 {
+   $preset_conf =  "5";
+   &preset_conf;
+}
+sub preset_6 {
+   $preset_conf =  "6";
+   &preset_conf;
+}
+sub preset_7 {
+   $preset_conf =  "7";
+   &preset_conf;
+}
+sub preset_8 {
+   $preset_conf =  "8";
+   &preset_conf;
+}
+sub preset_9 {
+   $preset_conf =  "9";
+   &preset_conf;
+}
+sub preset_conf {
+
+    my $debugbasemarge="sig-pc>>>";
+    my $thismarge = "  ".$debugbasemarge;
+    #debugging
+    my $currentquiet;
+    $currentquiet = $quiet;
+    #$currentquiet = True;
+    
+    my $preset_cfile;
+    print $debugbasemarge."#preset_conf { - click Presetbutton: $preset_conf }\n"  if not $currentquiet;
+
+    if ($config_location_preset->get_text()) {
+        $preset_cfile = $config_location_preset->get_text()."/preset".$preset_conf.".conf";
+    }   
+    else {
+        $preset_cfile = $preset_path."/preset".$preset_conf.".conf";
+    }    
+    
+   # $current_presetfile_db = $preset_path."/preset".$preset_conf.".conf";
+    $current_presetfile_db = $preset_cfile;
+    
+   # $presetfile_chooser->set_filename($preset_path."/preset$preset_conf.conf");
+    
+   # my $pc_configfile = $presetfile_chooser->get_filename;
+      print $thismarge." execute load_preset &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& \n"  if not $currentquiet;
+
+    &load_preset ($thismarge,$current_presetfile_db);
+    
+    print $thismarge." execute update_preview &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& \n"  if not $currentquiet;
+  
+    &update_preview ($thismarge);
+    print $debugbasemarge."#}preset_conf \n"  if not $currentquiet;
+  
+}
+
+sub presetfile_loader {
+
+    my $debugbasemarge="sig-pfl>>>";
+    my $thismarge = "  ".$debugbasemarge;
+    #debugging
+    my $currentquiet;
+    $currentquiet = $quiet;
+    $currentquiet = True;
+
+    print $debugbasemarge."#presetfile_loader{ \n"  if not $quiet;
+    #$preset_conf = "file";
+    
+    #my $pc_configfile = $presetfile_chooser->get_filename; #button content
+    
+#    &load_preset($pc_configfile);
+    &load_preset ($thismarge,$current_presetfile_db);
+    print $thismarge." presetfile_loader update screen\n"  if not $quiet;
+    &update_preview ($thismarge);
+    print $debugbasemarge."#}presetfile_loader\n"  if not $quiet;
+}
+
+sub sig_presetfile_saver {
+   print "#sig_presetfile_saver{ \n"  if not $quiet;
+   &save_preset;
+   print "#}sig_presetfile_saver\n"  if not $quiet;
+}
+
+sub save_preset {
+  print "#save_preset{\n" if not $quiet; 
+  my $thismarge = "  ";
+  my $i;
+  my $settings;
+  my $pc_configfile= "";
+    
+  $pc_configfile = $presetfile_nameinput->get_text;
+  print $thismarge."file $pc_configfile  \n" if not $quiet;
+  
+  
+  open($settings, "> ".$pc_configfile);
+  $fi_title = "# B-label preset-file";
+  print $thismarge."title = ". $fi_title ." \n" if not $quiet;
+  print $settings $fi_title."\n";
+
+  print $thismarge."version = ver". VERSION ." \n" if not $quiet;
+  print $settings "ver".VERSION."\n";
+  
+  print $thismarge."description = ". $presetfile_description->get_text ." \n" if not $quiet;
+  #print $settings $json->encode($presetfile_description->get_text)."\n";
+  print $settings $json->encode($presetfile_description->get_text);
+  
+  
+  #print $settings "Description presetfile\n";
+
+  for ($i=1; $i<5; $i++) {
+    print $settings $fontselect[$i]->get_font_name."\n";
+    print $settings &boolean2int($underline[$i]->get_active)."\n";
+    print $settings &boolean2int($strikethrough[$i]->get_active)."\n";
+    print $settings $json->encode($entry[$i]->get_text);
+  }
+  
+  print $settings &boolean2int($inverse->get_active)."\n";
+  print $settings $halign->get_active_id."\n";
+  print $settings $valign->get_active_id."\n";
+  print $settings $tapetype->get_active_id."\n";           # labelheight
+  print $settings $printerselect->get_active_text."\n";    # printer description
+  print $settings &boolean2int($autocut->get_active)."\n"; # autocut
+  
+  print $thismarge."repeatcount = ". $repeatcount->get_text ." \n" if not $quiet;
+  print $settings $repeatcount->get_text."\n";             #repeat count
+  
+  print $settings $fixedwidth_mm->get_text."\n";           # fixed width
+  
+  my $filenaam;
+  $filenaam = $headerfile_bf_filename;
+  #$filenaam = $headerfile_bf->get_filename;
+  if (not $filenaam) { $filenaam = "(nothing)"; } 
+  print $thismarge."headerfile_bf = " . $filenaam ."\n" if not $quiet;
+  print $settings  $json->encode($filenaam);
+  
+  $filenaam = $headerfile_ol_filename;
+  #$filenaam = $headerfile_ol->get_filename;
+  if (not $filenaam) { $filenaam = "(nothing)"; }  
+  print $thismarge."headerfile_ol = " .$filenaam ."\n" if not $quiet;
+  print $settings  $json->encode($filenaam);
+
+  $filenaam = $headerfile_il_filename;
+  #$filenaam = $headerfile_il->get_filename;
+  if (not $filenaam) { $filenaam = "(nothing)"; }  
+  print $thismarge."headerfile_il = " . $filenaam ."\n" if not $quiet;
+  print $settings  $json->encode($filenaam);
+  
+  $filenaam = $headerfile_ir_filename;
+  #$filenaam = $headerfile_ir->get_filename;
+  if (not $filenaam) { $filenaam = "(nothing)"; }  
+  print $thismarge."headerfile_ir = " . $filenaam ."\n" if not $quiet;
+  print $settings  $json->encode($filenaam);
+  
+  $filenaam = $headerfile_or_filename;
+  #$filenaam = $headerfile_or->get_filename;
+  if (not $filenaam) { $filenaam = "(nothing)"; }  
+  print $thismarge."headerfile_or = " . $filenaam ."\n" if not $quiet;
+  print $settings  $json->encode($filenaam);
+  
+  $filenaam = $headerfile_dv_filename;
+  #$filenaam = $headerfile_dv->get_filename;
+  if (not $filenaam) { $filenaam = "(nothing)"; }  
+  print $thismarge."headerfile_dv = " . $filenaam ."\n" if not $quiet;
+  print $settings  $json->encode($filenaam);
+
+  print $settings "\n";
+  close($settings);
+  
+  $current_presetfile_db = $pc_configfile;
+  
+  #$presetfile_chooser->set_filename($pc_configfile);
+   
+  &update_presetbuttons($thismarge);
+
+  print "#}save_preset \n" if not $quiet;
+}
+
+# Reads the configuration, attempts to validate it and then restores the values.
+# Also populates the printer list dropdown menu.
+sub load_preset {
+  my $debugbasemarge=$_[0];
+  my $thismarge = "  ".$debugbasemarge;
+  #debugging
+  my $currentquiet;
+  $currentquiet = $quiet;
+  $currentquiet = True;
+  
+  print $debugbasemarge."#load_preset{\n" if not $quiet;
+ 
+  my $i;
+  my $pc_pointer = 0;
+  my $pc_configfile= "";
+  my $pc_save_filename="";
+  my $preset_description="";
+  
+  $pc_configfile = $_[1];
+  
+  # $pc_configfile = $presetfile_chooser->get_filename;
+ 
+  # check if the variabele is empty
+  if ($pc_configfile) {
+    if (-f $pc_configfile) {
+    
+        print $thismarge."load preset file from $pc_configfile \n" if not $quiet;
+        
+        # print $thismarge." Reading preset file $pc_configfile .\n" if not $quiet;
+        $presetfile_nameinput->set_text($pc_configfile);    
+        
+        # open($settings, $ENV{HOME}."/.config/blabel/presets/preset$preset_conf.conf");
+        open($settings, $pc_configfile);
+        
+        my @presetconfiguration=<$settings>;
+        close($settings);
+        chomp(@presetconfiguration);
+
+        $pc_pointer++;  # skip first line of presetfile
+        print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+        my $presetconf_version = $presetconfiguration[$pc_pointer++];
+        print $thismarge."    presetconf_version: ".$presetconf_version ."\n";
+        if ($presetconf_version ne "ver".VERSION) {
+            print $thismarge."! Incorrect configuration version. Expected 'ver".VERSION."', got '".$presetconf_version."'.\n" if not $quiet;
+   
+        } else {
+    
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            
+            $preset_description = $json->decode($presetconfiguration[$pc_pointer++]);
+            $presetfile_description->set_text($preset_description);
+            print $thismarge."    Description:$preset_description \n" if not $quiet;
+            
+            # Since the system default font varies, we get whatever is defaulted here.
+            $defaultfont=$fontselect[1]->get_font_name;
+            # Restore per-line settings
+            for ($i=0; $i<4; $i++) {
+                print $thismarge."- Restore preset line: $pc_pointer sub:".($i+1)."\n" if not $quiet;
+            # print $thismarge."  sub ".($i+1)."\n" if not $quiet;
+                
+                
+                #$pc_pointer++;
+                #print $thismarge."    Font: $presetconfiguration[($i*3)+2]\n" if not $quiet;
+                print $thismarge."    Font: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+                $fontselect[$i+1]->set_font_name($presetconfiguration[$pc_pointer++]);
+
+                # The clear input dialog's restore saved font is taken here.
+                $configfont[$i+1]=$fontselect[$i+1]->get_font_name;
+                #print $thismarge."    Underline: $presetconfiguration[($i*3)+3]\n" if not $quiet;
+
+                print $thismarge."    Underline: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+                if ($presetconfiguration[$pc_pointer++]) {
+                $underline[$i+1]->set_active(TRUE);
+                } else {
+                $underline[$i+1]->set_active(FALSE);
+                }
+                #print $thismarge."    Strikethrough: $presetconfiguration[($i*3)+4]\n" if not $quiet;
+                print $thismarge."    Strikethrough: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+        
+                if ($presetconfiguration[$pc_pointer++]) {
+                $strikethrough[$i+1]->set_active(TRUE);
+                } else {
+                $strikethrough[$i+1]->set_active(FALSE);      
+                }
+                
+                # text
+                print $thismarge."    Text: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+                if ($presetconfiguration[$pc_pointer]) {
+                  $entry[$i+1]->set_text($json->decode($presetconfiguration[$pc_pointer]));
+#                  $entry[$i+1]->set_text($presetconfiguration[$pc_pointer]);
+                } else {
+                $entry[$i+1]->set_text("");
+                }
+                $pc_pointer++;
+                #
+                
+            }
+
+            # Restore inverse setting
+            
+            #line 14
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            print $thismarge."    inverse: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+        
+            if ($presetconfiguration[$pc_pointer++]) {
+                $inverse->set_active(TRUE);
+            } else {
+                $inverse->set_active(FALSE);
+            }
+            # Sanity-check and restore horizontal alignment
+             print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            if (($presetconfiguration[$pc_pointer] eq "left") || ($presetconfiguration[$pc_pointer] eq "center") || ($presetconfiguration[$pc_pointer] eq "right")) {
+                $halign->set_active_id($presetconfiguration[$pc_pointer]);
+                print $thismarge."    HAlign: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+            } else {
+                print $thismarge."! Incorrect HAlign value: '$presetconfiguration[$pc_pointer]'!\n" if not $quiet;
+            }
+            $pc_pointer++;
+            # Sanity-check and restore vertical alignment
+              
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            if (($presetconfiguration[$pc_pointer] eq "top") || ($presetconfiguration[$pc_pointer] eq "middle") || ($presetconfiguration[$pc_pointer] eq "bottom")) {
+                $valign->set_active_id($presetconfiguration[$pc_pointer]);
+                print $thismarge."    VAlign: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+            } else {
+                print $thismarge."    ! Incorrect VAlign value: '$presetconfiguration[$pc_pointer]'!\n" if not $quiet;
+            }
+            $pc_pointer++;
+            # Sanity-check and restore tape size
+             
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            
+            my $tape_type_check = &tapetype_check ($presetconfiguration[$pc_pointer] );
+#            if (($presetconfiguration[$pc_pointer] eq "6") || ($presetconfiguration[$pc_pointer] eq "9") || ($presetconfiguration[$pc_pointer] eq "12") || ($presetconfiguration[$pc_pointer] eq "18") || ($presetconfiguration[$pc_pointer] eq "24")) {
+            if ($tape_type_check) {
+                $tapetype->set_active_id($presetconfiguration[$pc_pointer]);
+                print $thismarge."    Tape: $presetconfiguration[$pc_pointer] mm\n" if not $quiet;
+            } else {
+                print $thismarge."    ! Incorrect tape value: '$presetconfiguration[$pc_pointer]'!\n" if not $quiet;
+            }
+            $pc_pointer++;
+            
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            
+            # If we have the same printer than last time still connected, select that.
+            $i=0;
+            my @printers=$cups->getDestinations();
+            print $thismarge."    PresetPrinter: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+            foreach my $printer (@printers) {
+                my $printername=$printer->getName();
+                print $thismarge."    Printer $i : $printername\n" if not $quiet;
+                if ($presetconfiguration[$pc_pointer] eq $printername) {
+                print $thismarge."    Printer: $presetconfiguration[$pc_pointer]\n" if not $quiet;
+                $printerselect->set_active($i);
+                }
+                $i++;
+            }
+            $pc_pointer++;
+            
+            # Restore autocut setting. line 24
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            if ($presetconfiguration[$pc_pointer]) {
+                $autocut->set_active(TRUE);
+                print $thismarge."    Autocut: TRUE\n" if not $quiet;
+            }
+            else {
+                $autocut->set_active(FALSE);
+                print $thismarge."    Autocut: FALSE\n" if not $quiet;
+            }
+            $pc_pointer++;
+            
+            # restore repeat count line 25
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            my $tmprepeatcount = $presetconfiguration[$pc_pointer];
+            $repeatcount->set_text($tmprepeatcount);
+            print $thismarge."    Repeatcount : $tmprepeatcount \n" if not $quiet;
+            $pc_pointer++;
+            
+            
+               # restore fixed width line 26
+            print $thismarge."- Restore preset line: ".$pc_pointer." - repeatcount "."\n" if not $quiet;
+            my $tmpfixedwidth_mm = $presetconfiguration[$pc_pointer];
+            $fixedwidth_mm->set_text($tmpfixedwidth_mm);
+            print $thismarge."    fixedwidth_mm : $tmpfixedwidth_mm \n" if not $quiet;
+            $pc_pointer++;
+
+            #----------
+            my $file="";
+            my $jdecname="";
+            
+            print $thismarge."- Restore preset line: ".$pc_pointer." - icon bf "."\n" if not $quiet;
+            $jdecname = $json->decode($presetconfiguration[$pc_pointer++]);
+            $headerfile_bf_filename = &ic_disp_file($thismarge,$jdecname,$label_bf);
+            
+            print $thismarge."- Restore preset line: ".$pc_pointer." - icon ol "."\n" if not $quiet;
+            $jdecname = $json->decode($presetconfiguration[$pc_pointer++]);
+            $headerfile_ol_filename = &ic_disp_file($thismarge,$jdecname,$label_ol);
+
+
+            
+            print $thismarge."- Restore preset line: ".$pc_pointer." - icon il "."\n" if not $quiet;     
+            $jdecname = $json->decode($presetconfiguration[$pc_pointer++]);
+            $headerfile_il_filename = &ic_disp_file($thismarge,$jdecname,$label_il);
+  
+            print $thismarge."- Restore preset line: ". $pc_pointer." - icon ir "."\n" if not $quiet;
+            $jdecname = $json->decode($presetconfiguration[$pc_pointer++]);
+            $headerfile_ir_filename = &ic_disp_file($thismarge,$jdecname,$label_ir);
+            
+            print $thismarge."- Restore preset line: ". $pc_pointer." - icon or "."\n" if not $quiet;  
+            $jdecname = $json->decode($presetconfiguration[$pc_pointer++]);
+              #print $thismarge."- Restore preset line: ". $pc_pointer." - icon or2 "."\n" if not $quiet;  
+          
+            $headerfile_or_filename = &ic_disp_file($thismarge,$jdecname,$label_or);
+            
+            print $thismarge."- Restore preset line: ". $pc_pointer." - icon dv "."\n" if not $quiet;
+            $jdecname = $json->decode($presetconfiguration[$pc_pointer++]);
+            $headerfile_dv_filename = &ic_disp_file($thismarge,$jdecname,$label_dv);
+    
+            
+            print $thismarge."- Finished loading preset $pc_configfile .\n " if not $quiet;
+        }
+    } else {
+        print $thismarge."! Preset file $pc_configfile not found.\n" if not $quiet;
+        
+    }
+  } else {
+    print $thismarge."! Preset file pc_configfile is empty.\n" if not $quiet;
+    
+  }
+   #print $thismarge."- END load preset file $pc_configfile ************************************** load_preset() ***** \n" if not $quiet;
+   
+  print $debugbasemarge."#}load_preset\n" if not $quiet;
+
+  return;
+}
+
+
+sub update_presetbuttons {
+    my $debugbasemarge=$_[0];
+    my $thismarge = "  ".$debugbasemarge;
+    #debugging
+    my $currentquiet;
+    $currentquiet = $quiet;
+    $currentquiet = True;
+    # the buttonstatus is updated when loading the start configfile and when saving a presetfile.
+    # because there might be a standard preset file saved
+    my $i_f;
+    my $preset_cfile;
+
+    for ($i_f=0; $i_f<10; $i_f++) {
+      
+            if ($config_location_preset->get_text()) {
+               $preset_cfile = $config_location_preset->get_text()."/preset".$i_f.".conf";
+            }   
+            else {
+               $preset_cfile = $preset_path."/preset".$i_f.".conf";
+            }
+            
+            #$preset_cfile = $preset_path."/preset".$i_f.".conf";
+            #print $thismarge."  check standard preset file ".$preset_cfile." " if not $quiet;
+            my $tmpkey;
+            $tmpkey = "preset_".$i_f;
+            my $temp_handler = $buttonarray{ $tmpkey } ;    # hash
+            if (not (-f $preset_cfile)) {
+                #print $thismarge." file not found \n";
+                $temp_handler->set_sensitive(0);
+            } else {
+                #print $thismarge." preset found \n";
+                $temp_handler->set_sensitive(1);
+            }
+            
+            $label_tmp = $buttonarray{ $tmpkey };
+            $label_tmp->set_tooltip_text (&get_presetbutton_description ($thismarge,$preset_cfile));
+    }
+}
+
+
+sub get_presetbutton_description {
+    my $debugbasemarge=$_[0];
+    my $thismarge = "  ".$debugbasemarge;
+    #debugging
+    my $currentquiet;
+    $currentquiet = $quiet;
+    $currentquiet = True;
+ 
+  
+  print $debugbasemarge."#get_presetbutton_description{\n" if not $quiet;
+ 
+  my $i;
+  my $pc_pointer = 0;
+  my $pc_configfile= "";
+  my $pc_save_filename="";
+  my $preset_description="";
+  my $tooltip_text="";
+  
+  $pc_configfile = $_[1];
+  
+  # $pc_configfile = $presetfile_chooser->get_filename;
+ 
+  # check if the variabele is empty
+  if ($pc_configfile) {
+    if (-f $pc_configfile) {
+    
+        print $thismarge."load preset file description from $pc_configfile \n" if not $quiet;
+        
+        # print $thismarge." Reading preset file $pc_configfile .\n" if not $quiet;
+        #$presetfile_nameinput->set_text($pc_configfile);    
+        
+        # open($settings, $ENV{HOME}."/.config/blabel/presets/preset$preset_conf.conf");
+        open($settings, $pc_configfile);
+        
+        my @presetconfiguration=<$settings>;
+        close($settings);
+        chomp(@presetconfiguration);
+
+        $pc_pointer++;  # skip first line of presetfile
+        print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+        my $presetconf_version = $presetconfiguration[$pc_pointer++];
+        print $thismarge."    presetconf_version: ".$presetconf_version ."\n";
+        
+        if ($presetconf_version ne "ver".VERSION) {
+            print $thismarge."! Incorrect configuration version. Expected 'ver".VERSION."', got '".$presetconf_version."'.\n" if not $quiet;
+                   $tooltip_text="! Incorrect configuration version. Expected 'ver".VERSION."', got '".$presetconf_version."'.\n";
+ 
+   
+        } else {
+    
+            print $thismarge."- Restore preset line: $pc_pointer\n" if not $quiet;
+            
+            $preset_description = $json->decode($presetconfiguration[$pc_pointer++]);
+            #$presetfile_description->set_text($preset_description);
+            print $thismarge."    Description:$preset_description \n" if not $quiet;
+            $tooltip_text=$preset_description;
+
+        }
+    } else {
+        print $thismarge."! Preset file $pc_configfile not found.\n" if not $quiet;
+        $tooltip_text="! Preset file $pc_configfile not found.";
+        
+    }
+  } else {
+    print $thismarge."! Preset file pc_configfile is empty.\n" if not $quiet;
+    $tooltip_text="! Preset file pc_configfile is empty.\n";
+    
+  }
+   #print $thismarge."- END load preset file $pc_configfile ************************************** load_preset() ***** \n" if not $quiet;
+   
+  print $debugbasemarge."#}get_presetbutton_description\n" if not $quiet;
+
+  return $tooltip_text;
+}
+#======================
+sub sig_hide_subwindows {
+ # is not working as it should
+ $config_window->hide();
+ $about_window->hide;
+ $reset_window->hide;
+}
+
+
+#======================
+sub tapetype_check {
+    my $this_tape_type=$_[0];
+    if (($this_tape_type eq "6") || ($this_tape_type eq "9") || ($this_tape_type eq "9+") ||  ($this_tape_type eq "12") ||($this_tape_type eq "12+") || ($this_tape_type eq "18") || ($this_tape_type eq "18+") || ($this_tape_type eq "24") ) {
+       return 1;
+    } 
+    else {
+       return 0;
+    }
+}
+
+
+sub main {
+  my $debugbasemarge = "";
+  print $debugbasemarge."# main { \n" if not $quiet;
+  my $thismarge = $debugbasemarge."  ";
+  our $quiet=0;
+  
+  our $oneshot=0;
+  our $nosave=0;
+  our $preset_conf="";
+  
+  
+  my $headerbf="";
+  my $headerol="";
+  my $headeril="";
+  my $headerir="";
+  my $headeror="";
+  my $headerdv="";
+  
+  my $targetprinter="";
+  my $help=0;
+  my $printerlist=0;
+  my $printer="";
+  my $autocut=-1;
+  my $version=0;
+  my $print=0;
+  my $tape=-1;
+  my $inv=-1;
+  my $repeat=-1;
+  my $fixedwidth=-1;
+  my $veralign=-1;
+  my $horalign=-1;
+  my @line=();
+  my @font=();
+  my @uline=();
+  my @strthrough=();
+  our $cups=Net::CUPS->new();
+  
+  print $thismarge."Get commandline options \n" if not $quiet;
+  GetOptions("headerbf:s" => \$headerbf,
+             "headerol:s" => \$headerol,
+             "headeril:s" => \$headeril,
+             "headerir:s" => \$headerir,
+             "headeror:s" => \$headeror,
+             "headerdv:s" => \$headerdv,
+             "printer:s" => \$targetprinter,
+             "help" => \$help,
+             "autocut!" => \$autocut,
+             "inverse!" => \$inv,
+             "quiet" => \$quiet,
+             "print" => \$print,
+             "oneshot" => \$oneshot,
+             "printerlist" => \$printerlist,
+             "version" => \$version,
+             "nosave" => \$nosave,
+             "tape:s" => \$tape,
+             "repeat:s" => \$repeat,
+             "fixedwidth:s" => \$fixedwidth,
+             "valign:s" => \$veralign,
+             "halign:s" => \$horalign,
+             "line1:s" => \$line[1],
+             "line2:s" => \$line[2],
+             "line3:s" => \$line[3],
+             "line4:s" => \$line[4],
+             "font1:s" => \$font[1],
+             "font2:s" => \$font[2],
+             "font3:s" => \$font[3],
+             "font4:s" => \$font[4],
+             "strikethrough1!" => \$strthrough[1],
+             "strikethrough2!" => \$strthrough[2],
+             "strikethrough3!" => \$strthrough[3],
+             "strikethrough4!" => \$strthrough[4],
+             "underline1!" => \$uline[1],
+             "underline2!" => \$uline[2],
+             "underline3!" => \$uline[3],
+             "underline4!" => \$uline[4]
+             );
+
+  if ($help) {
+    pod2usage(1);
+    exit;
+  }
+
+  if ($printerlist) {
+    my @printers=$cups->getDestinations();
+    foreach my $printer (@printers) {
+      my $printername=$printer->getName();
+      print "$printername\n";
+    }
+    exit;
+  }
+
+
+  if ($version) {
+    print "B-Label ".VERSIONDESCRIPTION." (".VERSIONDATE.")\n";
+    exit;
+  }
+
+  print $thismarge."initialize GUI \n" if not $quiet;
+  &init_gui_config($thismarge,$targetprinter, $autocut, $tape, $veralign, $horalign, $inv, $repeat, $fixedwidth);
+  
+  
+  
+  print $thismarge."Deal with commandline options \n" if not $quiet;
+  # Deal with command line parameter input text and font selections
+  foreach (1..4) {
+    if ((defined($line[$_])) && ($line[$_] ne "")) {
+      $entry[$_]->set_text($line[$_]);
+    }
+
+    if ((defined($font[$_])) && ($font[$_] ne "")) {
+      $fontselect[$_]->set_font_name($font[$_]);
+    }
+
+    if (defined($strthrough[$_])) {
+      if (($strthrough[$_]==1)) {
+        $strikethrough[$_]->set_active(1);
+      } else {
+        $strikethrough[$_]->set_active(0);
+      }
+    }
+
+    if (defined($uline[$_])) {
+      if (($uline[$_]==1)) {
+        $underline[$_]->set_active(1);
+      } else {
+        $underline[$_]->set_active(0);
+      }
+    }
+  }
+
+  if ($headerbf ne "") {
+    if (-f $headerbf) {
+      print "Headerfile_bf_filename to $headerbf\n" if not $quiet;
+      $headerfile_bf->set_filename($headerbf);
+      $headerfile_bf_filename=$headerbf;
+    } else {
+      print "Unable to set Headerfile_bf_filename, $headerbf does not exist.\n";
+    }
+  }
+
+  if ($headerol ne "") {
+    if (-f $headerol) {
+      print "headerfile_ol_filename set to $headerol\n" if not $quiet;
+      $headerfile_ol->set_filename($headerol);
+      $headerfile_ol_filename=$headerol;
+    } else {
+      print "Unable to set headerfile_ol_filename, $headerol does not exist.\n";
+    }
+  }  
+  
+   if ($headeril ne "") {
+    if (-f $headeril) {
+      print "headerfile_il_filename set to $headeril\n" if not $quiet;
+      $headerfile_il->set_filename($headeril);
+      $headerfile_il_filename=$headeril;
+    } else {
+      print "Unable to set headerfile_il_filename, $headeril does not exist.\n";
+    }
+  }  
+  
+  if ($headerir ne "") {
+    if (-f $headerir) {
+      print "headerfile_ir_filename set to $headerir\n" if not $quiet;
+      $headerfile_ir->set_filename($headerir);
+      $headerfile_ir_filename=$headerir;
+    } else {
+      print "Unable to set headerfile_ir_filename, $headerir does not exist.\n";
+    }
+  }  
+  
+  if ($headeror ne "") {
+    if (-f $headeror) {
+      print "headerfile_or_filename set to $headeror\n" if not $quiet;
+      $headerfile_or->set_filename($headeror);
+      $headerfile_or_filename=$headeror;
+    } else {
+      print "Unable to set headerfile_or_filename, $headeror does not exist.\n";
+    }
+  }  
+  
+  if ($headerdv ne "") {
+    if (-f $headerdv) {
+      print "headerfile_dv_filename set to $headerdv\n" if not $quiet;
+      $headerfile_dv->set_filename($headerdv);
+      $headerfile_dv_filename=$headerdv;
+    } else {
+      print "Unable to set headerfile_dv_filename, $headerdv does not exist.\n";
+    }
+  }  
+
+  $print_bufferwindow->set_sensitive(0);
+  $clear_bufferwindow->set_sensitive(0);
+  $view_buffer->set_sensitive(0);
+  
+  print $thismarge."Update preview \n" if not $quiet;  
+  #print "Update preview triggered in Main{} with commandline variables %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% \n" if not $quiet;
+  
+  &update_preview($thismarge);
+
+  if ($print) {
+    if (($line[1] ne "") || ($line[2] ne "") || ($line[3] ne "") || ($line[4] ne "")) {
+      print "Automatic print enabled, printing.\n" if not $quiet;
+      &print_now;
+    } else {
+      print "Automatic print enabled, but no text defined, ignoring.\n";
+    }
+  }
+  print $thismarge."Start GUI interaction ---Gtk3->main--- \n" if not $quiet;
+  Gtk3->main;
+  print $debugbasemarge."} main \n" if not $quiet;  
+}
+
+&main;
+
+
+__END__
+
+
