@@ -108,7 +108,7 @@ the preset and buffer functionallity is not available on the commandline.
   - blabel-print    # The actual printing script/app that sends the image to the printer (can be erased when you only use version2)
   
 - /usr/share/pixmaps/  
-  - blabel.png      # The image in the "about" window
+  - blabel2.png      # The image in the "about" window
   
 - /usr/share/applications/  
   - blabel.desktop  # The desktop icon
@@ -117,7 +117,7 @@ the preset and buffer functionallity is not available on the commandline.
   - blabel2.glade   # The app-layout, this is part of the app itself
   
 - $HOME/.config/blabel/
-  - blabel.conf     # The config-file blabel.conf preserves the window content on exit of the app. It is not usable as preset file for quick presets or other user presets. It will be overwritten each session.
+  - blabel.json     # The config-file blabel.json preserves the window content on exit of the app. It is not usable as preset file for quick presets or other user presets. It will be overwritten each session.
 
 - $HOME/.config/blabel/presets   # This directory is the location of the presets.
   - XXXXXX.conf # These will be read and written by the app. It is possible to edit them manually.
