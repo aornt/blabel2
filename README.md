@@ -13,14 +13,17 @@ There are a few bugs in the blabel2 app, but I have no time to investigate. For 
 
 # INSTALLATION
 Connect the brother label-printer with USB
-Create a new printer in cups with the RAW profile (or ASCII text)
 
-install the rpm package from blabel
-add the files and directories from blabel2 as described in LOCATION further on in this readme
+Create a new printer in CUPS with the RAW profile (or ASCII text)
+
+Install the rpm package from blabel
+
+Add the files and directories from blabel2 as described in LOCATION further on in this readme
 
 
 # LABEL PRINTING WORKFLOW
 The app has the mainwindow in which the text and the icons are composed in a labelblok. 
+
 The text can be vertically divided in 1,2,3 or 4 lines with different text.
 The each line can independend of the other lines be formatted with a different font, size, underline or strike-true.
 
