@@ -1,8 +1,7 @@
 # blabel2
-
-# INTRODUCTION
 Brother P-touch labelprinter for Linux
 
+# INTRODUCTION
 Blabel2 is build upon the work of Ari from Finland and uses his installation.
 The app is only tested with a brother p-touch 2430PC but may work for others.
 It is all written in Perl and uses GTK3
@@ -13,7 +12,6 @@ Maybe the Blabel2 GUI can make use of the Rademacher version as a backend for pr
 There are a few bugs in the blabel2 app, but I have no time to investigate. For me all the essentials work.
 
 # INSTALLATION
-
 Connect the brother label-printer with USB
 Create a new printer in cups with the RAW profile (or ASCII text)
 
@@ -22,7 +20,6 @@ add the files and directories from blabel2 as described in LOCATION further on i
 
 
 # LABEL PRINTING WORKFLOW
-
 The app has the mainwindow in which the text and the icons are composed in a labelblok. 
 The text can be vertically divided in 1,2,3 or 4 lines with different text.
 The each line can independend of the other lines be formatted with a different font, size, underline or strike-true.
@@ -47,7 +44,6 @@ The buffer is not stored on harddisk and is empty when starting the label app.
 
 
 # PRESETS
-
 In the mainwindow it is possible to store presets. The items that are stored as preset-item are:
 - line 1 to 4
   text
@@ -99,11 +95,9 @@ Presetconfiguration files can also be anywhere. If you locate them elsewhere it 
 
 
 # COMMANDLINE
-
 the preset and buffer functionallity is not available on the commandline. 
 
 # LOCATION
-
 - /usr/bin        # the perlscripts 
   blabel2         # the new script/app version2 that creates the image
   blabel2-print   # the updated printing script/app that sends the image to the printer (version 2)
